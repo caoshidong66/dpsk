@@ -189,7 +189,6 @@ def evaluate_cot_and_tot_on_samples(
         )
         # CoT
         cot_out = run_llama_cot_on_single(
-            dataset_root=None,
             model_dir=model_dir,
             sample=sample,
             use_vllm=use_vllm_for_cot,
@@ -204,7 +203,6 @@ def evaluate_cot_and_tot_on_samples(
         )
         # ToT
         tot_out = run_llama_tot_on_single(
-            dataset_root=None,
             model_dir=model_dir,
             num_step_candidates=branches,
             rollouts_per_candidate=rollouts_per_candidate,
