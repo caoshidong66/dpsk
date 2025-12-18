@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from cot_math import _load_one_hendrycks_sample  # type: ignore
 from dataset_utils import iter_samples, normalize_sample
-from llama_cot_math import run_llama_cot_on_single
-from llama_tot_math import run_llama_tot_on_single
+from llama_cot_math import run_llama_cot_on_batch, run_llama_cot_on_single
+from llama_tot_math import run_llama_tot_on_batch, run_llama_tot_on_single
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_ID_DIR = _REPO_ROOT / "datas" / "eval_ids"
@@ -172,6 +172,10 @@ def evaluate_cot_and_tot_on_samples(
     rollouts_per_candidate: int = 4,
     rollout_batch_size: int = 16,
     temperature: float = 0.5,
+    cot_batch_size: int = 1,
+    tot_batch_size: int = 1,
+    run_cot: bool = True,
+    run_tot: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     在给定的一批样本上分别跑 CoT 和 ToT，并统计正确率。
@@ -182,52 +186,101 @@ def evaluate_cot_and_tot_on_samples(
     cot_results: List[Dict[str, Any]] = []
     tot_results: List[Dict[str, Any]] = []
 
-    for idx, sample in enumerate(samples):
-        print(
-            f"[eval] sample {idx + 1}/{len(samples)} - running CoT "
-            f"({'vLLM' if use_vllm_for_cot else 'transformers'})"
-        )
-        # CoT
-        cot_out = run_llama_cot_on_single(
-            model_dir=model_dir,
-            sample=sample,
-            use_vllm=use_vllm_for_cot,
-        )
-        cot_results.append(cot_out)
-        if cot_out.get("is_correct"):
-            cot_correct += 1
-
-        print(
-            f"[eval] sample {idx + 1}/{len(samples)} - running ToT "
-            f"({'vLLM' if use_vllm_for_tot else 'transformers'})"
-        )
-        # ToT
-        tot_out = run_llama_tot_on_single(
-            model_dir=model_dir,
-            num_step_candidates=branches,
-            rollouts_per_candidate=rollouts_per_candidate,
-            temperature=temperature,
-            use_vllm=use_vllm_for_tot,
-            rollout_batch_size=rollout_batch_size,
-            sample=sample,
-        )
-        tot_results.append(tot_out)
-        if tot_out.get("final_is_correct"):
-            tot_correct += 1
-
-        print(f"[eval] processed sample {idx + 1}/{len(samples)}")
-
     n = len(samples)
+    # CoT (optionally batched)
+    if run_cot:
+        if cot_batch_size <= 1:
+            for idx, sample in enumerate(samples):
+                print(
+                    f"[eval] sample {idx + 1}/{n} - running CoT "
+                    f"({'vLLM' if use_vllm_for_cot else 'transformers'})"
+                )
+                cot_out = run_llama_cot_on_single(
+                    model_dir=model_dir,
+                    sample=sample,
+                    use_vllm=use_vllm_for_cot,
+                )
+                cot_results.append(cot_out)
+                if cot_out.get("is_correct"):
+                    cot_correct += 1
+                print(f"[eval] processed CoT sample {idx + 1}/{n}")
+        else:
+            for start in range(0, n, cot_batch_size):
+                chunk = samples[start : start + cot_batch_size]
+                print(
+                    f"[eval] CoT batch {start + 1}-{min(start + cot_batch_size, n)}/{n} "
+                    f"({'vLLM' if use_vllm_for_cot else 'transformers'})"
+                )
+                cot_outs = run_llama_cot_on_batch(
+                    samples=chunk,
+                    model_dir=model_dir,
+                    use_vllm=use_vllm_for_cot,
+                )
+                for out in cot_outs:
+                    cot_results.append(out)
+                    if out.get("is_correct"):
+                        cot_correct += 1
+
+    # ToT (optionally batched)
+    if run_tot:
+        if tot_batch_size <= 1:
+            for idx, sample in enumerate(samples):
+                print(
+                    f"[eval] sample {idx + 1}/{n} - running ToT "
+                    f"({'vLLM' if use_vllm_for_tot else 'transformers'})"
+                )
+                tot_out = run_llama_tot_on_single(
+                    model_dir=model_dir,
+                    num_step_candidates=branches,
+                    rollouts_per_candidate=rollouts_per_candidate,
+                    temperature=temperature,
+                    use_vllm=use_vllm_for_tot,
+                    rollout_batch_size=rollout_batch_size,
+                    sample=sample,
+                )
+                tot_results.append(tot_out)
+                if tot_out.get("final_is_correct"):
+                    tot_correct += 1
+                print(f"[eval] processed ToT sample {idx + 1}/{n}")
+        else:
+            for start in range(0, n, tot_batch_size):
+                chunk = samples[start : start + tot_batch_size]
+                print(
+                    f"[eval] ToT batch {start + 1}-{min(start + tot_batch_size, n)}/{n} "
+                    f"({'vLLM' if use_vllm_for_tot else 'transformers'})"
+                )
+                tot_outs = run_llama_tot_on_batch(
+                    samples=chunk,
+                    model_dir=model_dir,
+                    num_step_candidates=branches,
+                    rollouts_per_candidate=rollouts_per_candidate,
+                    temperature=temperature,
+                    use_vllm=use_vllm_for_tot,
+                    rollout_batch_size=rollout_batch_size,
+                )
+                for out in tot_outs:
+                    tot_results.append(out)
+                    if out.get("final_is_correct"):
+                        tot_correct += 1
+
     cot_summary = {
         "num_samples": n,
         "num_correct": cot_correct,
         "accuracy": cot_correct / n if n > 0 else None,
     }
-    tot_summary = {
-        "num_samples": n,
-        "num_correct": tot_correct,
-        "accuracy": tot_correct / n if n > 0 else None,
-    }
+    if run_tot:
+        tot_summary = {
+            "num_samples": n,
+            "num_correct": tot_correct,
+            "accuracy": tot_correct / n if n > 0 else None,
+        }
+    else:
+        tot_summary = {
+            "num_samples": 0,
+            "num_correct": 0,
+            "accuracy": None,
+            "skipped": True,
+        }
 
     return (
         {"summary": cot_summary, "details": cot_results},
@@ -245,6 +298,10 @@ def _worker_eval_one_shard(
     rollouts_per_candidate: int,
     rollout_batch_size: int,
     temperature: float,
+    cot_batch_size: int,
+    tot_batch_size: int,
+    run_cot: bool,
+    run_tot: bool,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     单个进程在指定 GPU 上跑一批样本。
@@ -261,6 +318,10 @@ def _worker_eval_one_shard(
         rollouts_per_candidate=rollouts_per_candidate,
         rollout_batch_size=rollout_batch_size,
         temperature=temperature,
+        cot_batch_size=cot_batch_size,
+        tot_batch_size=tot_batch_size,
+        run_cot=run_cot,
+        run_tot=run_tot,
     )
 
 
@@ -372,6 +433,23 @@ if __name__ == "__main__":
         help="ToT rollout 阶段一次并行多少个 prompt（默认：16，等于 4 候选 x 4 rollout）",
     )
     parser.add_argument(
+        "--cot-batch-size",
+        type=int,
+        default=1,
+        help="CoT 评测批大小（默认：1；vLLM 时可设置更大）。",
+    )
+    parser.add_argument(
+        "--tot-batch-size",
+        type=int,
+        default=1,
+        help="ToT 评测批大小（默认：1；vLLM 时可设置更大）。",
+    )
+    parser.add_argument(
+        "--only-cot",
+        action="store_true",
+        help="只跑 CoT 评测，跳过 ToT。",
+    )
+    parser.add_argument(
         "--temperature",
         type=float,
         default=0.5,
@@ -473,6 +551,10 @@ if __name__ == "__main__":
             rollouts_per_candidate=args.rollouts_per_candidate,
             rollout_batch_size=args.rollout_batch_size,
             temperature=args.temperature,
+            cot_batch_size=args.cot_batch_size,
+            tot_batch_size=args.tot_batch_size,
+            run_cot=True,
+            run_tot=not args.only_cot,
         )
     else:
         # 切 shard
@@ -515,6 +597,10 @@ if __name__ == "__main__":
                         args.rollouts_per_candidate,
                         args.rollout_batch_size,
                         args.temperature,
+                        args.cot_batch_size,
+                        args.tot_batch_size,
+                        True,
+                        not args.only_cot,
                     )
                 )
             for fut in futures:
@@ -524,12 +610,15 @@ if __name__ == "__main__":
         total_samples = 0
         cot_correct = 0
         tot_correct = 0
+        tot_skipped = True
         for cot_eval_part, tot_eval_part in results:
             cs = cot_eval_part["summary"]
             ts = tot_eval_part["summary"]
             total_samples += cs["num_samples"]
             cot_correct += cs["num_correct"]
-            tot_correct += ts["num_correct"]
+            tot_correct += ts.get("num_correct", 0)
+            if not ts.get("skipped"):
+                tot_skipped = False
 
         cot_eval = {
             "summary": {
@@ -541,9 +630,10 @@ if __name__ == "__main__":
         }
         tot_eval = {
             "summary": {
-                "num_samples": total_samples,
-                "num_correct": tot_correct,
-                "accuracy": tot_correct / total_samples if total_samples > 0 else None,
+                "num_samples": 0 if tot_skipped else total_samples,
+                "num_correct": 0 if tot_skipped else tot_correct,
+                "accuracy": None if tot_skipped else (tot_correct / total_samples if total_samples > 0 else None),
+                "skipped": tot_skipped,
             },
             "details": [],
         }

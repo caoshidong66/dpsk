@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from cot_math import build_completion_prompt
 from dataset_utils import default_dataset_path, load_one_sample
@@ -35,6 +35,32 @@ def _cot_completion_with_vllm(
     if not first.outputs:
         return ""
     return first.outputs[0].text
+
+
+def _cot_completion_batch_with_vllm(
+    prompts: List[str],
+    model_dir: Optional[Union[str, Path]],
+    temperature: float,
+    max_new_tokens: int,
+) -> List[str]:
+    from vllm import SamplingParams  # type: ignore
+
+    model_path = resolve_model_dir(model_dir)
+    engine = get_vllm_engine(model_path)
+    sampling_params = SamplingParams(
+        temperature=temperature,
+        top_p=0.95,
+        max_tokens=max_new_tokens,
+        n=1,
+    )
+    outputs = engine.generate(prompts, sampling_params)
+    results: List[str] = []
+    for out in outputs:
+        if not out.outputs:
+            results.append("")
+        else:
+            results.append(out.outputs[0].text)
+    return results
 
 
 def run_llama_cot_on_single(
@@ -107,6 +133,80 @@ def run_llama_cot_on_single(
         "raw_sample": sample,
     }
     return result
+
+
+def run_llama_cot_on_batch(
+    samples: List[Dict[str, Any]],
+    model_dir: Optional[Union[str, Path]] = None,
+    temperature: float = 0.2,
+    max_new_tokens: int = 512,
+    use_vllm: bool = False,
+    num_steps: Optional[int] = None,
+    dataset_name: str = "hendrycks_math",
+) -> List[Dict[str, Any]]:
+    if not samples:
+        return []
+
+    prompts: List[str] = []
+    steps_list: List[int] = []
+    for sample in samples:
+        problem = (
+            sample.get("problem")
+            or sample.get("question")
+            or sample.get("prompt")
+        )
+        if not problem:
+            raise ValueError("Sample does not contain a 'problem' / 'question' field.")
+        level = sample.get("level")
+        if num_steps is None:
+            if dataset_name.strip().lower() in {"gsm8k", "svamp"}:
+                steps_eff = steps_for_dataset(dataset_name)
+            else:
+                steps_eff = steps_for_level(level)
+        else:
+            steps_eff = num_steps
+        steps_list.append(steps_eff)
+        prompts.append(build_completion_prompt(problem, num_steps=steps_eff))
+
+    if use_vllm:
+        completions = _cot_completion_batch_with_vllm(
+            prompts=prompts,
+            model_dir=model_dir,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+        )
+    else:
+        completions = [
+            llama_completion(
+                prompt=prompt,
+                model_dir=model_dir,
+                temperature=temperature,
+                max_new_tokens=max_new_tokens,
+            )
+            for prompt in prompts
+        ]
+
+    results: List[Dict[str, Any]] = []
+    for sample, prompt, completion, steps_eff in zip(samples, prompts, completions, steps_list):
+        answer = extract_model_answer(completion)
+        solution = sample.get("solution") or sample.get("answer")
+        is_correct_flag = False
+        if solution is not None:
+            is_correct_flag = is_model_correct(completion, solution)
+        results.append(
+            {
+                "prompt": prompt,
+                "completion": completion,
+                "answer": answer,
+                "is_correct": is_correct_flag,
+                "problem": sample.get("problem") or sample.get("question") or sample.get("prompt"),
+                "level": sample.get("level"),
+                "raw_sample": sample,
+                "num_steps": steps_eff,
+            }
+        )
+
+    return results
 
 
 if __name__ == "__main__":

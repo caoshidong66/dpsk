@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 from cot_math import build_completion_prompt
 from dataset_utils import default_dataset_path, load_one_sample
@@ -321,6 +321,201 @@ def run_llama_tot_on_single(
         "raw_sample": sample,
     }
     return result
+
+
+def run_llama_tot_on_batch(
+    samples: List[Dict[str, Any]],
+    model_dir: Optional[Union[str, Path]] = None,
+    num_step_candidates: int = 1,
+    rollouts_per_candidate: int = 1,
+    temperature: float = 0.5,
+    use_vllm: bool = True,
+    rollout_batch_size: int = 16,
+    num_steps: Optional[int] = None,
+    dataset_name: str = "hendrycks_math",
+) -> List[Dict[str, Any]]:
+    if not samples:
+        return []
+
+    states: List[Dict[str, Any]] = []
+    for sample in samples:
+        problem = (
+            sample.get("problem")
+            or sample.get("question")
+            or sample.get("prompt")
+        )
+        if not problem:
+            raise ValueError("Sample does not contain a 'problem' / 'question' field.")
+        solution = sample.get("solution") or sample.get("answer")
+        level = sample.get("level")
+        if num_steps is None:
+            if dataset_name.strip().lower() in {"gsm8k", "svamp"}:
+                steps_eff = steps_for_dataset(dataset_name)
+            else:
+                steps_eff = steps_for_level(level)
+        else:
+            steps_eff = num_steps
+        prompt = build_completion_prompt(problem, num_steps=steps_eff)
+        states.append(
+            {
+                "problem": problem,
+                "solution": solution,
+                "level": level,
+                "prompt": prompt,
+                "num_steps": steps_eff,
+                "current_prefix": prompt,
+                "steps_trace": [],
+                "done": False,
+                "raw_sample": sample,
+            }
+        )
+
+    max_steps = max(int(s["num_steps"]) for s in states)
+    for step_idx in range(1, max_steps + 1):
+        active_indices = [
+            i for i, s in enumerate(states)
+            if (not s["done"]) and step_idx <= int(s["num_steps"])
+        ]
+        if not active_indices:
+            break
+
+        step_prompts: List[str] = []
+        for i in active_indices:
+            current_prefix = states[i]["current_prefix"]
+            step_prompts.append(_ensure_step_prefix(current_prefix, step_idx))
+
+        step_samples_nested = _generate_batch(
+            prompts=step_prompts,
+            model_dir=model_dir,
+            temperature=temperature,
+            max_new_tokens=256,
+            top_p=0.95,
+            n=num_step_candidates,
+            use_vllm=use_vllm,
+            stop_tokens=[f"\nStep {step_idx + 1}:", "\nAnswer:"],
+        )
+
+        candidate_prefixes_per_sample: List[List[str]] = [[] for _ in active_indices]
+        candidates_per_sample: List[List[Dict[str, Any]]] = [[] for _ in active_indices]
+
+        for local_idx, step_samples in enumerate(step_samples_nested):
+            step_prompt = step_prompts[local_idx]
+            for cand_idx, step_completion in enumerate(step_samples):
+                step_text = _extract_step_block(step_completion, step_idx)
+                cand_prefix = step_prompt + (step_text + "\n" if step_text else "\n")
+                candidates_per_sample[local_idx].append(
+                    {
+                        "candidate_index": cand_idx,
+                        "step_text": step_text,
+                        "success_count": 0,
+                        "success_rate": 0.0,
+                    }
+                )
+                candidate_prefixes_per_sample[local_idx].append(cand_prefix)
+
+        rollout_requests: List[Tuple[int, int, str]] = []
+        for local_idx, candidate_prefixes in enumerate(candidate_prefixes_per_sample):
+            for cand_idx, cand_prefix in enumerate(candidate_prefixes):
+                for r in range(rollouts_per_candidate):
+                    rollout_requests.append((local_idx, cand_idx, cand_prefix))
+
+        if rollout_requests:
+            rollout_prompts = [req[2] for req in rollout_requests]
+            rollout_outputs_nested = _generate_batch(
+                prompts=rollout_prompts,
+                model_dir=model_dir,
+                temperature=temperature,
+                max_new_tokens=256,
+                top_p=0.95,
+                n=1,
+                use_vllm=use_vllm,
+                chunk_size=rollout_batch_size,
+            )
+            rollout_texts = [
+                texts[0] if texts else "" for texts in rollout_outputs_nested
+            ]
+
+            for (local_idx, cand_idx, cand_prefix), rollout_completion in zip(
+                rollout_requests, rollout_texts
+            ):
+                state = states[active_indices[local_idx]]
+                solution = state["solution"]
+                full_output = cand_prefix + rollout_completion
+                is_correct_flag = False
+                if solution is not None:
+                    is_correct_flag = is_model_correct(full_output, solution)
+                if is_correct_flag:
+                    candidates_per_sample[local_idx][cand_idx]["success_count"] += 1
+
+        for local_idx, candidates in enumerate(candidates_per_sample):
+            for cand_entry in candidates:
+                if rollouts_per_candidate > 0:
+                    cand_entry["success_rate"] = (
+                        cand_entry["success_count"] / rollouts_per_candidate
+                    )
+
+            if candidates:
+                best_cand = max(
+                    candidates, key=lambda c: (c["success_rate"], -c["candidate_index"])
+                )
+            else:
+                best_cand = None
+
+            state = states[active_indices[local_idx]]
+            state["steps_trace"].append(
+                {
+                    "step_index": step_idx,
+                    "candidates": candidates,
+                    "chosen_candidate_index": best_cand["candidate_index"] if best_cand else None,
+                    "chosen_step_text": best_cand["step_text"] if best_cand else None,
+                    "chosen_success_rate": best_cand["success_rate"] if best_cand else None,
+                }
+            )
+
+            if best_cand is not None:
+                best_idx = int(best_cand["candidate_index"])
+                state["current_prefix"] = candidate_prefixes_per_sample[local_idx][best_idx]
+            else:
+                state["done"] = True
+
+    final_prompts = [s["current_prefix"] for s in states]
+    final_outputs_nested = _generate_batch(
+        prompts=final_prompts,
+        model_dir=model_dir,
+        temperature=temperature,
+        max_new_tokens=256,
+        top_p=0.95,
+        n=1,
+        use_vllm=use_vllm,
+    )
+    final_completions = [
+        (texts[0] if texts else "") for texts in final_outputs_nested
+    ]
+
+    results: List[Dict[str, Any]] = []
+    for state, final_completion in zip(states, final_completions):
+        final_full_output = state["current_prefix"] + final_completion
+        final_answer = extract_model_answer(final_full_output)
+        final_is_correct: Optional[bool] = None
+        if state["solution"] is not None:
+            final_is_correct = is_model_correct(final_full_output, state["solution"])
+        results.append(
+            {
+                "problem": state["problem"],
+                "solution": state["solution"],
+                "level": state["level"],
+                "prompt": state["prompt"],
+                "steps_trace": state["steps_trace"],
+                "final_prefix": state["current_prefix"],
+                "final_completion": final_completion,
+                "final_full_output": final_full_output,
+                "final_answer": final_answer,
+                "final_is_correct": final_is_correct,
+                "raw_sample": state["raw_sample"],
+            }
+        )
+
+    return results
 
 
 if __name__ == "__main__":
