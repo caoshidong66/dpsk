@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from tool import steps_for_level
 
@@ -39,7 +39,7 @@ HENDRYCKS_DEFAULT_ROOT = Path(__file__).resolve().parent.parent / "hendrycks_mat
 
 
 def _load_one_hendrycks_sample(
-    dataset_root: Optional[str | Path] = None,
+    dataset_root: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     从 hendrycks_math 数据集中读取一条样本。
@@ -100,7 +100,7 @@ def _load_one_hendrycks_sample(
 
 
 def run_single_cot_from_hendrycks(
-    dataset_root: Optional[str | Path] = None,
+    dataset_root: Optional[Union[str, Path]] = None,
     model: str = "deepseek-v3-2-251201",
 ) -> Dict[str, Any]:
     """
@@ -146,7 +146,7 @@ def run_cot_on_math(
     dataset_path: str,
     output_path: str = "math_cot_outputs.jsonl",
     model: str = "deepseek-v3-2-251201",
-    limit: int | None = 100,
+    limit: Optional[int] = 100,
 ) -> None:
     """
     使用 ark_chat_with_stop 在 math 数据集上做 CoT 推理。

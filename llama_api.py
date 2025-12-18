@@ -1,7 +1,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
@@ -18,7 +18,7 @@ def _default_model_dir() -> Path:
 
 
 @lru_cache(maxsize=1)
-def _load_tokenizer_and_model(model_dir: Optional[str | Path] = None):
+def _load_tokenizer_and_model(model_dir: Optional[Union[str, Path]] = None):
     """
     懒加载本地 LLaMA 模型，只在第一次调用时从磁盘加载。
     """
@@ -42,7 +42,7 @@ def _load_tokenizer_and_model(model_dir: Optional[str | Path] = None):
 
 def llama_completion(
     prompt: str,
-    model_dir: Optional[str | Path] = None,
+    model_dir: Optional[Union[str, Path]] = None,
     temperature: float = 0.7,
     max_new_tokens: int = 512,
     top_p: float = 0.95,

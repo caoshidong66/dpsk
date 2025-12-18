@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from cot_math import build_completion_prompt
 from dataset_utils import default_dataset_path, load_one_sample
@@ -79,7 +79,7 @@ def _ensure_step_prefix(prefix: str, step_index: int) -> str:
 
 def _generate_batch(
     prompts: List[str],
-    model_dir: Optional[str | Path],
+    model_dir: Optional[Union[str, Path]],
     temperature: float,
     max_new_tokens: int,
     top_p: float,
@@ -138,9 +138,9 @@ def _generate_batch(
 
 def run_llama_tot_on_single(
     dataset_name: str = "hendrycks_math",
-    dataset_path: Optional[str | Path] = None,
+    dataset_path: Optional[Union[str, Path]] = None,
     split: str = "train",
-    model_dir: Optional[str | Path] = None,
+    model_dir: Optional[Union[str, Path]] = None,
     # 每个 step 要评估的候选步数
     num_step_candidates: int = 1,
     # 每个候选步 rollout 次数

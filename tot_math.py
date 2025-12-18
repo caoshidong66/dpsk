@@ -1,7 +1,7 @@
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from api import client, ark_chat_with_stop
 from cot_math import build_completion_prompt
@@ -11,7 +11,7 @@ from tool import extract_model_answer, extract_gt_answer, is_model_correct, step
 
 def run_tot_on_single_sample(
     dataset_name: str = "hendrycks_math",
-    dataset_path: Optional[str | Path] = None,
+    dataset_path: Optional[Union[str, Path]] = None,
     split: str = "train",
     model: str = "deepseek-v3-2-251201",
     num_branches: int = 5,

@@ -3,7 +3,7 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -18,7 +18,7 @@ from diffcot.gen import run_refine_chain
 
 def _reservoir_samples(
     dataset_name: str,
-    dataset_path: str | Path,
+    dataset_path: Union[str, Path],
     split: str,
     k: int,
     seed: int,

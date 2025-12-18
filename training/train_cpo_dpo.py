@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 from datasets import Dataset, load_dataset  # type: ignore
 from transformers import (
@@ -201,7 +201,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_pairwise_dataset(
-    dataset_path: str | Path,
+    dataset_path: Union[str, Path],
     prompt_col: str,
     chosen_col: str,
     rejected_col: str,

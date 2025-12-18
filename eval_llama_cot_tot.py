@@ -2,7 +2,7 @@ import json
 import os
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from cot_math import _load_one_hendrycks_sample  # type: ignore
 from dataset_utils import iter_samples, normalize_sample
@@ -165,7 +165,7 @@ def _load_hendrycks_samples_by_indices(
 
 def evaluate_cot_and_tot_on_samples(
     samples: List[Dict[str, Any]],
-    model_dir: Optional[str | Path],
+    model_dir: Optional[Union[str, Path]],
     use_vllm_for_cot: bool = True,
     use_vllm_for_tot: bool = False,
     branches: int = 4,
@@ -240,7 +240,7 @@ def evaluate_cot_and_tot_on_samples(
 def _worker_eval_one_shard(
     gpu_id: Optional[str],
     samples: List[Dict[str, Any]],
-    model_dir: Optional[str | Path],
+    model_dir: Optional[Union[str, Path]],
     use_vllm_for_cot: bool,
     use_vllm_for_tot: bool,
     branches: int,

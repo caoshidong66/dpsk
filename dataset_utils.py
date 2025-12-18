@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, Optional, Union
 
 
 def default_dataset_path(dataset_name: str) -> str:
@@ -46,7 +46,7 @@ def _iter_json(path: Path) -> Iterator[Dict[str, Any]]:
 
 def iter_samples(
     dataset_name: str,
-    dataset_path: Optional[str | Path] = None,
+    dataset_path: Optional[Union[str, Path]] = None,
     *,
     split: str = "train",
 ) -> Iterator[Dict[str, Any]]:
@@ -178,7 +178,7 @@ def normalize_sample(dataset_name: str, sample: Dict[str, Any]) -> Dict[str, Any
 
 def load_one_sample(
     dataset_name: str,
-    dataset_path: Optional[str | Path] = None,
+    dataset_path: Optional[Union[str, Path]] = None,
     *,
     split: str = "train",
 ) -> Dict[str, Any]:

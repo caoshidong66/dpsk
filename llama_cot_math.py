@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from cot_math import build_completion_prompt
 from dataset_utils import default_dataset_path, load_one_sample
@@ -11,7 +11,7 @@ from tool import extract_model_answer, is_model_correct, steps_for_dataset, step
 
 def _cot_completion_with_vllm(
     prompt: str,
-    model_dir: Optional[str | Path],
+    model_dir: Optional[Union[str, Path]],
     temperature: float,
     max_new_tokens: int,
 ) -> str:
@@ -39,9 +39,9 @@ def _cot_completion_with_vllm(
 
 def run_llama_cot_on_single(
     dataset_name: str = "hendrycks_math",
-    dataset_path: Optional[str | Path] = None,
+    dataset_path: Optional[Union[str, Path]] = None,
     split: str = "train",
-    model_dir: Optional[str | Path] = None,
+    model_dir: Optional[Union[str, Path]] = None,
     sample: Optional[Dict[str, Any]] = None,
     temperature: float = 0.2,
     max_new_tokens: int = 512,
