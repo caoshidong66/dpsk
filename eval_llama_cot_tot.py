@@ -1,11 +1,17 @@
 import json
 import os
+import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from cot_math import _load_one_hendrycks_sample  # type: ignore
+from dataset_utils import iter_samples, normalize_sample
 from llama_cot_math import run_llama_cot_on_single
 from llama_tot_math import run_llama_tot_on_single
+
+_REPO_ROOT = Path(__file__).resolve().parent
+_DEFAULT_ID_DIR = _REPO_ROOT / "datas" / "eval_ids"
+_DEFAULT_MERGED_DIR = _REPO_ROOT / "datas" / "merged_models"
 
 
 def _resolve_gpu_ids(user_spec: Optional[str]) -> List[Optional[str]]:
@@ -50,6 +56,111 @@ def _load_samples_from_hendrycks(
         sample = _load_one_hendrycks_sample(dataset_root=dataset_root)
         samples.append(sample)
     return samples
+
+
+def _parse_level(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        digits = "".join(ch for ch in value if ch.isdigit())
+        if not digits:
+            return None
+        try:
+            return int(digits)
+        except ValueError:
+            return None
+    return None
+
+
+def _merge_lora_adapter(
+    base_model_dir: Path,
+    lora_dir: Path,
+    output_dir: Path,
+    *,
+    reuse_if_exists: bool,
+) -> Path:
+    if reuse_if_exists and (output_dir / "config.json").exists():
+        return output_dir
+
+    try:
+        import torch
+        from peft import PeftModel  # type: ignore
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except Exception as exc:
+        raise RuntimeError(
+            "Merging LoRA requires `peft` and `transformers` to be installed."
+        ) from exc
+
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    device_map = "auto" if torch.cuda.is_available() else None
+
+    base = AutoModelForCausalLM.from_pretrained(
+        str(base_model_dir),
+        torch_dtype=dtype,
+        device_map=device_map,
+    )
+    model = PeftModel.from_pretrained(base, str(lora_dir))
+    model = model.merge_and_unload()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(str(output_dir))
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(str(base_model_dir), use_fast=False)
+        tokenizer.save_pretrained(str(output_dir))
+    except Exception:
+        pass
+
+    return output_dir
+
+
+def _select_hendrycks_indices_by_level(
+    dataset_root: Path,
+    *,
+    split: str,
+    level: int,
+    num_samples: int,
+    seed: int,
+) -> List[int]:
+    rng = random.Random(seed)
+    indices: List[int] = []
+    seen = 0
+    for idx, raw in enumerate(iter_samples("hendrycks_math", dataset_root, split=split)):
+        lvl = _parse_level(raw.get("level"))
+        if lvl != level:
+            continue
+        seen += 1
+        if len(indices) < num_samples:
+            indices.append(idx)
+            continue
+        j = rng.randint(1, seen)
+        if j <= num_samples:
+            indices[j - 1] = idx
+    if len(indices) < num_samples:
+        print(
+            f"[eval] Only found {len(indices)} samples for level={level} (requested {num_samples})."
+        )
+    return indices
+
+
+def _load_hendrycks_samples_by_indices(
+    dataset_root: Path,
+    *,
+    split: str,
+    indices: List[int],
+) -> List[Dict[str, Any]]:
+    if not indices:
+        return []
+    wanted = set(indices)
+    collected: Dict[int, Dict[str, Any]] = {}
+    for idx, raw in enumerate(iter_samples("hendrycks_math", dataset_root, split=split)):
+        if idx not in wanted:
+            continue
+        collected[idx] = normalize_sample("hendrycks_math", raw)
+        if len(collected) == len(wanted):
+            break
+    return [collected[i] for i in indices if i in collected]
 
 
 def evaluate_cot_and_tot_on_samples(
@@ -173,6 +284,48 @@ if __name__ == "__main__":
         help="随机评估多少条样本（默认：200）",
     )
     parser.add_argument(
+        "--split",
+        type=str,
+        default="train",
+        choices=["train", "test"],
+        help="hendrycks_math 的 split（默认：train）",
+    )
+    parser.add_argument(
+        "--level",
+        type=int,
+        default=None,
+        help="只评估指定难度 level 的样本（例如 3）。",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="采样随机种子（默认：42）",
+    )
+    parser.add_argument(
+        "--id-cache",
+        type=str,
+        default=None,
+        help="保存/读取采样样本索引的 JSON 文件路径（默认写入 datas/eval_ids/）。",
+    )
+    parser.add_argument(
+        "--lora-dir",
+        type=str,
+        default=None,
+        help="LoRA adapter 权重目录；提供后会自动 merge 到 base 模型。",
+    )
+    parser.add_argument(
+        "--merged-model-dir",
+        type=str,
+        default=None,
+        help="merge 后的模型保存目录（默认 datas/merged_models/）。",
+    )
+    parser.add_argument(
+        "--reuse-merged",
+        action="store_true",
+        help="如果 merge 输出目录已存在则直接复用（跳过重新 merge）。",
+    )
+    parser.add_argument(
         "--model-dir",
         type=str,
         default=None,
@@ -237,8 +390,72 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.lora_dir:
+        if not args.model_dir:
+            raise ValueError("--lora-dir requires --model-dir (base model directory).")
+        base_model_dir = Path(args.model_dir)
+        lora_dir = Path(args.lora_dir)
+        if args.merged_model_dir:
+            merged_dir = Path(args.merged_model_dir)
+        else:
+            _DEFAULT_MERGED_DIR.mkdir(parents=True, exist_ok=True)
+            merged_dir = _DEFAULT_MERGED_DIR / f"{lora_dir.name}_merged"
+        args.model_dir = str(
+            _merge_lora_adapter(
+                base_model_dir,
+                lora_dir,
+                merged_dir,
+                reuse_if_exists=args.reuse_merged,
+            )
+        )
+
     ds_root = Path(args.dataset_root)
-    samples = _load_samples_from_hendrycks(ds_root, args.num_samples)
+    if args.level is not None:
+        if args.id_cache:
+            cache_path = Path(args.id_cache)
+        else:
+            _DEFAULT_ID_DIR.mkdir(parents=True, exist_ok=True)
+            cache_path = _DEFAULT_ID_DIR / (
+                f"hendrycks_level{args.level}_{args.split}_{args.num_samples}.json"
+            )
+
+        if cache_path.exists():
+            with cache_path.open("r", encoding="utf-8") as f:
+                cached = json.load(f)
+            indices = cached.get("indices") if isinstance(cached, dict) else None
+            if not isinstance(indices, list) or not all(isinstance(i, int) for i in indices):
+                raise ValueError(f"Invalid id cache format: {cache_path}")
+        else:
+            indices = _select_hendrycks_indices_by_level(
+                ds_root,
+                split=args.split,
+                level=int(args.level),
+                num_samples=int(args.num_samples),
+                seed=int(args.seed),
+            )
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with cache_path.open("w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "dataset_root": str(ds_root),
+                        "split": args.split,
+                        "level": int(args.level),
+                        "num_samples": int(args.num_samples),
+                        "seed": int(args.seed),
+                        "indices": indices,
+                    },
+                    f,
+                    indent=2,
+                )
+            print(f"[eval] saved id cache -> {cache_path}")
+
+        samples = _load_hendrycks_samples_by_indices(
+            ds_root,
+            split=args.split,
+            indices=indices,
+        )
+    else:
+        samples = _load_samples_from_hendrycks(ds_root, args.num_samples)
 
     # 多 GPU / 多进程并行：按 GPU 数量把样本切成若干 shard
     gpu_ids = _resolve_gpu_ids(args.gpus)
