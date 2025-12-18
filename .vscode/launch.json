@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run llama_cot_math",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/llama_cot_math.py",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Run llama_tot_math",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/llama_tot_math.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--dataset-name",
+        "hendrycks_math",
+        "--dataset-path",
+        "/data/jsg_data/hendrycks_math",
+        "--model-dir",
+        "/data/jsg_data/model/meta-llama/llama3-8b"
+      ]
+    },
+    {
+      "name": "Run collect_tot (MATH level-3, 300, 4GPU)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/collect_tot.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--dataset-name",
+        "hendrycks_math",
+        "--dataset-path",
+        "/data/jsg_data/hendrycks_math",
+        "--level",
+        "3",
+        "--max-samples",
+        "300",
+        "--model-dir",
+        "/data/jsg_data/model/meta-llama/llama3-8b",
+        "--gpus",
+        "0,1,2,3",
+        "--output-dir",
+        "${workspaceFolder}/datas/tot_math_l3",
+        "--output-prefix",
+        "math_l3",
+        "--merge"
+      ]
+    }
+  ]
+}
