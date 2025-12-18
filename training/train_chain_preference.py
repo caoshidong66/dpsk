@@ -87,7 +87,12 @@ def load_chain_data(jsonl_path: Path) -> List[Dict[str, object]]:
     return records
 
 
-def convert_tot_to_chain_records(jsonl_path: Path, *, seed: int) -> List[Dict[str, object]]:
+def convert_tot_to_chain_records(
+    jsonl_path: Path,
+    *,
+    seed: int,
+    max_steps: Optional[int] = None,
+) -> List[Dict[str, object]]:
     records: List[Dict[str, object]] = []
     raw = load_chain_data(jsonl_path)
     rng = random.Random(int(seed))
@@ -140,7 +145,10 @@ def convert_tot_to_chain_records(jsonl_path: Path, *, seed: int) -> List[Dict[st
 
         if good_steps and bad_steps:
             length = min(len(good_steps), len(bad_steps))
-            out: Dict[str, object] = {
+            if max_steps is not None:
+                length = min(length, int(max_steps))
+
+            out = {
                 "problem": problem,
                 "good_steps": good_steps[:length],
                 "good_rewards": good_rewards[:length],
@@ -151,6 +159,79 @@ def convert_tot_to_chain_records(jsonl_path: Path, *, seed: int) -> List[Dict[st
                 out["prompt"] = prompt
             records.append(out)
     return records
+
+
+def flatten_chain_records(
+    records: List[Dict[str, object]],
+    *,
+    gamma: float,
+) -> List[Dict[str, object]]:
+    flat: List[Dict[str, object]] = []
+    for rec in records:
+        if "good_step" in rec and "bad_step" in rec:
+            flat.append(rec)
+            continue
+
+        problem = rec.get("problem")
+        prompt = rec.get("prompt")
+        good_steps = rec.get("good_steps")
+        bad_steps = rec.get("bad_steps")
+        good_rewards = rec.get("good_rewards")
+        bad_rewards = rec.get("bad_rewards")
+        ref_good_lp = rec.get("ref_good_logprobs")
+        ref_bad_lp = rec.get("ref_bad_logprobs")
+
+        if not (problem and good_steps and bad_steps and good_rewards and bad_rewards):
+            continue
+
+        if not (
+            isinstance(good_steps, list)
+            and isinstance(bad_steps, list)
+            and isinstance(good_rewards, list)
+            and isinstance(bad_rewards, list)
+        ):
+            continue
+
+        length = min(len(good_steps), len(bad_steps), len(good_rewards), len(bad_rewards))
+        if length == 0:
+            continue
+
+        alpha_w = softmax_weights(good_rewards[:length], gamma=gamma, device=torch.device("cpu"))
+        alpha_l = softmax_weights(bad_rewards[:length], gamma=-gamma, device=torch.device("cpu"))
+
+        if isinstance(prompt, str) and prompt.strip():
+            context_good = prompt
+            context_bad = prompt
+        else:
+            context_good = str(problem) + "\n"
+            context_bad = str(problem) + "\n"
+
+        for i in range(length):
+            out: Dict[str, object] = {
+                "problem": problem,
+                "step_index": i + 1,
+                "total_steps": length,
+                "prefix_good": context_good,
+                "prefix_bad": context_bad,
+                "good_step": good_steps[i],
+                "bad_step": bad_steps[i],
+                "good_reward": good_rewards[i],
+                "bad_reward": bad_rewards[i],
+                "good_weight": float(alpha_w[i].item()),
+                "bad_weight": float(alpha_l[i].item()),
+            }
+            if isinstance(prompt, str) and prompt.strip():
+                out["prompt"] = prompt
+            if isinstance(ref_good_lp, list) and i < len(ref_good_lp):
+                out["ref_good_logprob"] = ref_good_lp[i]
+            if isinstance(ref_bad_lp, list) and i < len(ref_bad_lp):
+                out["ref_bad_logprob"] = ref_bad_lp[i]
+            flat.append(out)
+
+            context_good = (context_good + str(good_steps[i])).rstrip() + "\n"
+            context_bad = (context_bad + str(bad_steps[i])).rstrip() + "\n"
+
+    return flat
 
 
 def encode_step(
@@ -265,6 +346,62 @@ def compute_stepwise_loss(
 ) -> torch.Tensor:
     total_loss = torch.tensor(0.0, device=device)
     for example in batch:
+        if "good_step" in example and "bad_step" in example:
+            problem = example["problem"]
+            prompt = example.get("prompt")
+            prefix_good = example.get("prefix_good")
+            prefix_bad = example.get("prefix_bad")
+            good_step = example["good_step"]
+            bad_step = example["bad_step"]
+            good_weight = example.get("good_weight", 1.0)
+            bad_weight = example.get("bad_weight", 1.0)
+            ref_good_lp = example.get("ref_good_logprob")
+            ref_bad_lp = example.get("ref_bad_logprob")
+
+            if not (problem and good_step and bad_step):
+                continue
+
+            if isinstance(prefix_good, str) and prefix_good.strip():
+                context_good = prefix_good
+            elif isinstance(prompt, str) and prompt.strip():
+                context_good = prompt
+            else:
+                context_good = str(problem) + "\n"
+
+            if isinstance(prefix_bad, str) and prefix_bad.strip():
+                context_bad = prefix_bad
+            elif isinstance(prompt, str) and prompt.strip():
+                context_bad = prompt
+            else:
+                context_bad = str(problem) + "\n"
+
+            logpi_w = compute_logprob_sum(
+                model, tokenizer, context_good, str(good_step), device, max_length=max_length
+            )
+            if isinstance(ref_good_lp, (int, float)):
+                logpi_ref_w = torch.tensor(float(ref_good_lp), device=device)
+            else:
+                logpi_ref_w = compute_ref_logprob_sum(
+                    model, ref_model, tokenizer, context_good, str(good_step), device, max_length=max_length
+                )
+
+            logpi_l = compute_logprob_sum(
+                model, tokenizer, context_bad, str(bad_step), device, max_length=max_length
+            )
+            if isinstance(ref_bad_lp, (int, float)):
+                logpi_ref_l = torch.tensor(float(ref_bad_lp), device=device)
+            else:
+                logpi_ref_l = compute_ref_logprob_sum(
+                    model, ref_model, tokenizer, context_bad, str(bad_step), device, max_length=max_length
+                )
+
+            good_weight_t = torch.tensor(float(good_weight), device=device)
+            bad_weight_t = torch.tensor(float(bad_weight), device=device)
+            logit = beta * (good_weight_t * (logpi_w - logpi_ref_w) - bad_weight_t * (logpi_l - logpi_ref_l))
+            loss = F.softplus(-logit)
+            total_loss = total_loss + loss
+            continue
+
         problem = example["problem"]
         prompt = example.get("prompt")
         ref_good_lp = example.get("ref_good_logprobs")
@@ -388,7 +525,18 @@ def parse_args() -> argparse.Namespace:
         "--max-steps",
         type=int,
         default=None,
-        help="Max number of reasoning steps to use per example (default: no limit).",
+        help=(
+            "Max number of reasoning steps to use per example (default: no limit). "
+            "In --flatten-steps mode, steps beyond this index are skipped."
+        ),
+    )
+    parser.add_argument(
+        "--flatten-steps",
+        action="store_true",
+        help=(
+            "Flatten each step into a separate (prefix, win, lose) training record to reduce memory. "
+            "This changes the per-example loss into per-step loss."
+        ),
     )
     parser.add_argument(
         "--grad-accum-steps",
@@ -497,7 +645,11 @@ def main() -> None:
     if args.data:
         records = load_chain_data(Path(args.data))
     elif args.tot_jsonl:
-        records = convert_tot_to_chain_records(Path(args.tot_jsonl), seed=int(args.seed))
+        records = convert_tot_to_chain_records(
+            Path(args.tot_jsonl),
+            seed=int(args.seed),
+            max_steps=args.max_steps,
+        )
     else:
         raise ValueError("Either --data or --tot-jsonl must be provided.")
 
@@ -505,6 +657,10 @@ def main() -> None:
         capped: List[Dict[str, object]] = []
         max_steps = int(args.max_steps)
         for r in records:
+            if "step_index" in r:
+                step_index = r.get("step_index")
+                if isinstance(step_index, int) and step_index > max_steps:
+                    continue
             good_steps = r.get("good_steps")
             bad_steps = r.get("bad_steps")
             good_rewards = r.get("good_rewards")
@@ -529,13 +685,22 @@ def main() -> None:
             capped.append(r)
         records = capped
 
+    if args.flatten_steps:
+        records = flatten_chain_records(records, gamma=float(args.gamma))
+
     if args.require_precomputed_ref:
         missing = 0
         for r in records:
-            a = r.get("ref_good_logprobs")
-            b = r.get("ref_bad_logprobs")
-            if not (isinstance(a, list) and isinstance(b, list) and len(a) == len(b) and len(a) > 0):
-                missing += 1
+            if "good_step" in r and "bad_step" in r:
+                a = r.get("ref_good_logprob")
+                b = r.get("ref_bad_logprob")
+                if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
+                    missing += 1
+            else:
+                a = r.get("ref_good_logprobs")
+                b = r.get("ref_bad_logprobs")
+                if not (isinstance(a, list) and isinstance(b, list) and len(a) == len(b) and len(a) > 0):
+                    missing += 1
         if missing:
             raise ValueError(
                 f"--require-precomputed-ref set but {missing} records are missing ref_*_logprobs. "
