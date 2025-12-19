@@ -15,6 +15,7 @@ TOT_JSONL[4]="datas/tot_math_l4/math_l4.20251215_203600.all.jsonl"
 TOT_JSONL[5]="datas/tot_math_l5/math_l5.20251216_011244.all.jsonl"
 
 RESULTS_FILE="outputs/chain_pref_eval_results.jsonl"
+mkdir -p "$(dirname "${RESULTS_FILE}")"
 
 for level in 1 2 3 4 5; do
   tot_path="${TOT_JSONL[$level]}"
