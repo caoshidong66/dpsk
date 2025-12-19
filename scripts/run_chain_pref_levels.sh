@@ -31,11 +31,13 @@ for level in 1 2 3 4 5; do
     --tot-jsonl "${tot_path}" \
     --model-name-or-path "${MODEL_DIR}" \
     --output-dir "${out_dir}" \
-    --batch-size 2 \
+    --batch-size 8 \
     --grad-accum-steps 1 \
     --bf16 \
     --device-map none \
-    --use-lora
+    --use-lora \
+    --flatten-steps \
+    --learning-rate 1e-5
 
   echo "[run] level ${level}: eval base (CoT only)"
   base_out="$(python eval_llama_cot_tot.py \
