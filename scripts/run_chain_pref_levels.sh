@@ -14,6 +14,8 @@ TOT_JSONL[3]="datas/tot_math_l3/math_l3.20251214_073429.all.jsonl"
 TOT_JSONL[4]="datas/tot_math_l4/math_l4.20251215_203600.all.jsonl"
 TOT_JSONL[5]="datas/tot_math_l5/math_l5.20251216_011244.all.jsonl"
 
+RESULTS_FILE="outputs/chain_pref_eval_results.jsonl"
+
 for level in 1 2 3 4 5; do
   tot_path="${TOT_JSONL[$level]}"
   if [[ ! -f "${tot_path}" ]]; then
@@ -36,7 +38,7 @@ for level in 1 2 3 4 5; do
     --use-lora
 
   echo "[run] level ${level}: eval base (CoT only)"
-  python eval_llama_cot_tot.py \
+  base_out="$(python eval_llama_cot_tot.py \
     --dataset-root "${DATA_ROOT}" \
     --split test \
     --level "${level}" \
@@ -44,10 +46,13 @@ for level in 1 2 3 4 5; do
     --model-dir "${MODEL_DIR}" \
     --gpus "${GPU_ID}" \
     --cot-batch-size 8 \
-    --only-cot
+    --only-cot)"
+  echo "${base_out}"
+  base_json="$(echo "${base_out}" | tail -n 1)"
+  echo "{\"level\":${level},\"model\":\"base\",\"result\":${base_json}}" >> "${RESULTS_FILE}"
 
   echo "[run] level ${level}: eval LoRA (CoT only)"
-  python eval_llama_cot_tot.py \
+  lora_out="$(python eval_llama_cot_tot.py \
     --dataset-root "${DATA_ROOT}" \
     --split test \
     --level "${level}" \
@@ -57,5 +62,8 @@ for level in 1 2 3 4 5; do
     --reuse-merged \
     --gpus "${GPU_ID}" \
     --cot-batch-size 8 \
-    --only-cot
+    --only-cot)"
+  echo "${lora_out}"
+  lora_json="$(echo "${lora_out}" | tail -n 1)"
+  echo "{\"level\":${level},\"model\":\"lora\",\"result\":${lora_json}}" >> "${RESULTS_FILE}"
 done
