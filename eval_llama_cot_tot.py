@@ -93,13 +93,11 @@ def _merge_lora_adapter(
             "Merging LoRA requires `peft` and `transformers` to be installed."
         ) from exc
 
-    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-    device_map = "auto" if torch.cuda.is_available() else None
-
     base = AutoModelForCausalLM.from_pretrained(
         str(base_model_dir),
-        torch_dtype=dtype,
-        device_map=device_map,
+        torch_dtype=torch.float32,
+        device_map="cpu",
+        low_cpu_mem_usage=True,
     )
     model = PeftModel.from_pretrained(base, str(lora_dir))
     model = model.merge_and_unload()

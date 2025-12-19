@@ -43,9 +43,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import torch
+import torch.distributed as dist
 from torch.nn import functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -579,13 +582,18 @@ def main() -> None:
     args = parse_args()
 
     # GPU selection must happen before the first CUDA init (e.g., torch.cuda.is_available()).
-    if args.gpus:
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+    using_ddp = local_rank >= 0
+    if args.gpus and not using_ddp:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpus)
     if args.disable_p2p:
         os.environ.setdefault("NCCL_P2P_DISABLE", "1")
         os.environ.setdefault("NCCL_IB_DISABLE", "1")
 
     torch.manual_seed(int(args.seed))
+    if using_ddp:
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend="nccl")
 
     accelerator = None
     if args.deepspeed_config:
@@ -708,7 +716,16 @@ def main() -> None:
             )
 
     dataset = ChainPrefDataset(records)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=lambda x: x)
+    sampler = None
+    if using_ddp:
+        sampler = DistributedSampler(dataset, shuffle=True, drop_last=False)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=(sampler is None),
+        sampler=sampler,
+        collate_fn=lambda x: x,
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=False)
     if tokenizer.pad_token is None:
@@ -723,14 +740,19 @@ def main() -> None:
     # DeepSpeed handles placement; device_map sharding is incompatible with it.
     if accelerator is not None and args.device_map != "none":
         raise ValueError("When using --deepspeed-config, please set --device-map none.")
+    if using_ddp and args.device_map != "none":
+        raise ValueError("When using DDP, please set --device-map none.")
 
     if accelerator is not None:
         device = accelerator.device
     else:
-        if args.device_map == "auto":
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if using_ddp:
+            device = torch.device(f"cuda:{local_rank}")
         else:
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            if args.device_map == "auto":
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            else:
+                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
@@ -776,7 +798,7 @@ def main() -> None:
         freeze_model(ref_model)
 
     # Use the embedding device for inputs/tensors (important for device_map=auto).
-    if accelerator is None:
+    if accelerator is None and not using_ddp:
         device = _infer_input_device(model, device)
 
     # DeepSpeed ZeRO-3 can assert if the same Parameter appears multiple times in the optimizer param list.
@@ -800,9 +822,13 @@ def main() -> None:
         model, optimizer, dataloader, scheduler = accelerator.prepare(
             model, optimizer, dataloader, scheduler
         )
+    elif using_ddp:
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     model.train()
     for epoch in range(args.epochs):
+        if using_ddp and sampler is not None:
+            sampler.set_epoch(epoch)
         for step, batch in enumerate(dataloader, start=1):
             ctx = accelerator.accumulate(model) if accelerator is not None else nullcontext()
             with ctx:
@@ -825,7 +851,10 @@ def main() -> None:
                 optimizer.zero_grad()
 
             if step % 10 == 0:
-                if accelerator is None or accelerator.is_main_process:
+                if accelerator is None:
+                    if not using_ddp or dist.get_rank() == 0:
+                        print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
+                elif accelerator.is_main_process:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
 
     out_dir = Path(args.output_dir)
@@ -845,9 +874,14 @@ def main() -> None:
             tokenizer.save_pretrained(str(out_dir))
             print(f"[chain_pref] saved -> {out_dir}")
     else:
-        model.save_pretrained(str(out_dir))
-        tokenizer.save_pretrained(str(out_dir))
-        print(f"[chain_pref] saved -> {out_dir}")
+        if not using_ddp or dist.get_rank() == 0:
+            to_save = model.module if using_ddp else model
+            to_save.save_pretrained(str(out_dir))
+            tokenizer.save_pretrained(str(out_dir))
+            print(f"[chain_pref] saved -> {out_dir}")
+        if using_ddp:
+            dist.barrier()
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":

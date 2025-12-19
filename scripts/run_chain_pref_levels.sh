@@ -5,7 +5,8 @@ set -euo pipefail
 DATA_ROOT="../data/hendrycks_math"
 MODEL_DIR="../model/Meta-Llama-3-8B"
 NUM_SAMPLES=300
-GPU_ID="0"
+GPU_IDS="0,1"
+NUM_GPUS=2
 
 declare -A TOT_JSONL
 TOT_JSONL[1]="datas/tot_math_l1/math_l1.20251215_152302.all.jsonl"
@@ -28,7 +29,7 @@ for level in 1 2 3 4 5; do
   lora_dir="weights/${out_dir}"
 
   echo "[run] level ${level}: training -> ${out_dir}"
-  CUDA_VISIBLE_DEVICES="${GPU_ID}" python training/train_chain_preference.py \
+  CUDA_VISIBLE_DEVICES="${GPU_IDS}" torchrun --nproc_per_node="${NUM_GPUS}" training/train_chain_preference.py \
     --tot-jsonl "${tot_path}" \
     --model-name-or-path "${MODEL_DIR}" \
     --output-dir "${out_dir}" \
@@ -47,8 +48,8 @@ for level in 1 2 3 4 5; do
     --level "${level}" \
     --num-samples "${NUM_SAMPLES}" \
     --model-dir "${MODEL_DIR}" \
-    --gpus "${GPU_ID}" \
-    --cot-batch-size 8 \
+    --gpus "${GPU_IDS}" \
+    --cot-batch-size 4 \
     --only-cot)"
   echo "${base_out}"
   base_json="$(echo "${base_out}" | tail -n 1)"
@@ -63,8 +64,8 @@ for level in 1 2 3 4 5; do
     --model-dir "${MODEL_DIR}" \
     --lora-dir "${lora_dir}" \
     --reuse-merged \
-    --gpus "${GPU_ID}" \
-    --cot-batch-size 8 \
+    --gpus "${GPU_IDS}" \
+    --cot-batch-size 4 \
     --only-cot)"
   echo "${lora_out}"
   lora_json="$(echo "${lora_out}" | tail -n 1)"
