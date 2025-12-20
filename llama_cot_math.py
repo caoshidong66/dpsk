@@ -28,7 +28,7 @@ def _cot_completion_with_vllm(
         max_tokens=max_new_tokens,
         n=1,
     )
-    outputs = engine.generate([prompt], sampling_params)
+    outputs = engine.generate([prompt], sampling_params, use_tqdm=False)
     if not outputs:
         return ""
     first = outputs[0]
@@ -53,7 +53,7 @@ def _cot_completion_batch_with_vllm(
         max_tokens=max_new_tokens,
         n=1,
     )
-    outputs = engine.generate(prompts, sampling_params)
+    outputs = engine.generate(prompts, sampling_params, use_tqdm=False)
     results: List[str] = []
     for out in outputs:
         if not out.outputs:

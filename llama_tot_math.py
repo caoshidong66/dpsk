@@ -112,7 +112,7 @@ def _generate_batch(
         all_texts: List[List[str]] = []
         for i in range(0, len(prompts), chunk_size):
             chunk = prompts[i : i + chunk_size]
-            outputs = engine.generate(chunk, sampling_params)
+            outputs = engine.generate(chunk, sampling_params, use_tqdm=False)
             for out in outputs:
                 texts = [o.text for o in out.outputs]
                 all_texts.append(texts)

@@ -596,6 +596,8 @@ def main() -> None:
 
     os.environ.setdefault("VLLM_DISABLE_PROGRESS_BAR", "1")
     os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
+    os.environ.setdefault("TQDM_DISABLE", "1")
+    os.environ.setdefault("DISABLE_TQDM", "1")
 
     gpus = _parse_gpus(args.gpus)
     output_dir = Path(args.output_dir)
