@@ -594,6 +594,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    os.environ.setdefault("VLLM_DISABLE_PROGRESS_BAR", "1")
+    os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
+
     gpus = _parse_gpus(args.gpus)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

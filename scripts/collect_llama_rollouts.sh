@@ -18,6 +18,7 @@ python collect_tot.py \
   --output-dir "${OUT_ROOT}/gsm8k" \
   --output-prefix gsm8k_tot \
   --sample-batch-size 8 \
+  --rollout-batch-size 100 \
   --merge
 
 python collect_tot.py \
@@ -28,4 +29,5 @@ python collect_tot.py \
   --output-dir "${OUT_ROOT}/svamp" \
   --output-prefix svamp_tot \
   --sample-batch-size 8 \
+  --rollout-batch-size 100 \
   --merge
