@@ -19,8 +19,8 @@ python collect_tot.py \
   --model-dir "${MODEL_DIR}" \
   --output-dir "${OUT_ROOT}/gsm8k" \
   --output-prefix gsm8k_tot \
-  --sample-batch-size 8 \
-  --rollout-batch-size 100 \
+  --sample-batch-size 24 \
+  --rollout-batch-size 300 \
   --max-samples "${GSM8K_MAX}" \
   --merge
 
@@ -31,7 +31,7 @@ python collect_tot.py \
   --model-dir "${MODEL_DIR}" \
   --output-dir "${OUT_ROOT}/svamp" \
   --output-prefix svamp_tot \
-  --sample-batch-size 8 \
-  --rollout-batch-size 100 \
+  --sample-batch-size 24 \
+  --rollout-batch-size 300 \
   --max-samples "${SVAMP_MAX}" \
   --merge
