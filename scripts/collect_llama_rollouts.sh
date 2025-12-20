@@ -17,6 +17,7 @@ python collect_tot.py \
   --model-dir "${MODEL_DIR}" \
   --output-dir "${OUT_ROOT}/gsm8k" \
   --output-prefix gsm8k_tot \
+  --sample-batch-size 8 \
   --merge
 
 python collect_tot.py \
@@ -26,4 +27,5 @@ python collect_tot.py \
   --model-dir "${MODEL_DIR}" \
   --output-dir "${OUT_ROOT}/svamp" \
   --output-prefix svamp_tot \
+  --sample-batch-size 8 \
   --merge

@@ -7,12 +7,12 @@ import re
 import random
 import time
 from datetime import datetime
-from multiprocessing import get_context
+from multiprocessing import get_context, Manager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dataset_utils import default_dataset_path, iter_samples, normalize_sample
-from llama_tot_math import run_llama_tot_on_single
+from llama_tot_math import run_llama_tot_on_batch, run_llama_tot_on_single
 
 
 def _parse_gpus(value: str) -> List[str]:
@@ -195,54 +195,131 @@ def _worker_main(
     use_vllm: bool,
     rollout_batch_size: int,
     num_steps: Optional[int],
+    sample_batch_size: int,
+    progress_total: Optional[int],
+    progress_counter,
+    progress_lock,
+    progress_rank0: bool,
 ) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
     out_fp = Path(output_path)
     out_fp.parent.mkdir(parents=True, exist_ok=True)
+    def _progress_line(processed_count: int, total_count: Optional[int]) -> None:
+        if not progress_rank0:
+            return
+        if total_count is None or total_count <= 0:
+            msg = f"[collect_tot] processed={processed_count}"
+        else:
+            msg = (
+                f"[collect_tot] processed={processed_count}/{total_count} "
+                f"({processed_count / total_count:.1%})"
+            )
+        print("\r" + msg, end="", flush=True)
+
+    def _finish_progress() -> None:
+        if progress_rank0:
+            print("", flush=True)
+
+    def _bump_progress(delta: int) -> None:
+        if progress_counter is None:
+            return
+        with progress_lock:
+            progress_counter.value += delta
+            _progress_line(progress_counter.value, progress_total)
+
+    def _estimate_total_samples() -> Optional[int]:
+        if max_samples is not None:
+            max_samples_i = int(max_samples)
+            if max_samples_i > 0:
+                return max_samples_i
+        try:
+            if dataset_name == "gsm8k":
+                base = Path(dataset_path)
+                file_path = base / f"{split}.jsonl" if base.is_dir() else base
+                with file_path.open("r", encoding="utf-8") as f_count:
+                    return sum(1 for _ in f_count)
+            if dataset_name == "svamp":
+                path = Path(dataset_path)
+                with path.open("r", encoding="utf-8") as f_count:
+                    data = json.load(f_count)
+                if isinstance(data, list):
+                    return len(data)
+                if isinstance(data, dict) and isinstance(data.get("data"), list):
+                    return len(data["data"])
+            if dataset_name == "hendrycks_math":
+                root = Path(dataset_path)
+                jsonl_files = list(root.rglob("*.jsonl"))
+                json_files = list(root.rglob("*.json")) if not jsonl_files else []
+                if jsonl_files:
+                    total = 0
+                    for fp in jsonl_files:
+                        with fp.open("r", encoding="utf-8") as f_count:
+                            total += sum(1 for _ in f_count)
+                    return total
+                if json_files:
+                    total = 0
+                    for fp in json_files:
+                        with fp.open("r", encoding="utf-8") as f_count:
+                            data = json.load(f_count)
+                        if isinstance(data, list):
+                            total += len(data)
+                        elif isinstance(data, dict) and isinstance(data.get("data"), list):
+                            total += len(data["data"])
+                        else:
+                            total += 1
+                    return total
+        except Exception:
+            return None
+        return None
+
     with out_fp.open("a", encoding="utf-8") as f:
         processed = 0
         if selected is not None:
+            batch_entries: List[Dict[str, Any]] = []
             for pos, entry in enumerate(selected):
                 if pos % world_size != rank:
                     continue
-                idx = int(entry["index"])
-                sample = entry["sample"]
+                batch_entries.append(entry)
+                if len(batch_entries) < sample_batch_size:
+                    continue
+
                 t0 = time.time()
-                out = run_llama_tot_on_single(
-                    dataset_name=dataset_name,
-                    dataset_path=dataset_path,
-                    split=split,
+                outputs = run_llama_tot_on_batch(
+                    samples=[e["sample"] for e in batch_entries],
                     model_dir=model_dir,
                     num_step_candidates=branches,
                     rollouts_per_candidate=rollouts_per_candidate,
                     temperature=temperature,
                     use_vllm=use_vllm,
                     rollout_batch_size=rollout_batch_size,
-                    sample=sample,
                     num_steps=num_steps,
                 )
                 elapsed = time.time() - t0
-                record: Dict[str, Any] = {
-                    "dataset_name": dataset_name,
-                    "dataset_path": str(dataset_path),
-                    "split": split,
-                    "index": idx,
-                    "gpu": str(gpu_id),
-                    "rank": rank,
-                    "world_size": world_size,
-                    "elapsed_sec": elapsed,
-                    "tot": out,
-                }
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                for entry_item, out in zip(batch_entries, outputs):
+                    idx = int(entry_item["index"])
+                    record = {
+                        "dataset_name": dataset_name,
+                        "dataset_path": str(dataset_path),
+                        "split": split,
+                        "index": idx,
+                        "gpu": str(gpu_id),
+                        "rank": rank,
+                        "world_size": world_size,
+                        "elapsed_sec": elapsed,
+                        "tot": out,
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    processed += 1
                 f.flush()
-                processed += 1
-                if processed % 5 == 0:
-                    print(
-                        f"[collect_tot][gpu={gpu_id}] processed={processed} (last_idx={idx})"
-                    )
+                _bump_progress(len(batch_entries))
+                batch_entries = []
             return
 
+        total_all = _estimate_total_samples()
+
+        batch_samples: List[Dict[str, Any]] = []
+        batch_indices: List[int] = []
         for idx, raw in enumerate(iter_samples(dataset_name, dataset_path, split=split)):
             if idx < start_index:
                 continue
@@ -254,37 +331,71 @@ def _worker_main(
                 continue
 
             sample = normalize_sample(dataset_name, raw)
+            batch_samples.append(sample)
+            batch_indices.append(idx)
+            if len(batch_samples) < sample_batch_size:
+                continue
+
             t0 = time.time()
-            out = run_llama_tot_on_single(
-                dataset_name=dataset_name,
-                dataset_path=dataset_path,
-                split=split,
+            outputs = run_llama_tot_on_batch(
+                samples=batch_samples,
                 model_dir=model_dir,
                 num_step_candidates=branches,
                 rollouts_per_candidate=rollouts_per_candidate,
                 temperature=temperature,
                 use_vllm=use_vllm,
                 rollout_batch_size=rollout_batch_size,
-                sample=sample,
                 num_steps=num_steps,
             )
             elapsed = time.time() - t0
-            record: Dict[str, Any] = {
-                "dataset_name": dataset_name,
-                "dataset_path": str(dataset_path),
-                "split": split,
-                "index": idx,
-                "gpu": str(gpu_id),
-                "rank": rank,
-                "world_size": world_size,
-                "elapsed_sec": elapsed,
-                "tot": out,
-            }
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            for out_idx, out in zip(batch_indices, outputs):
+                record: Dict[str, Any] = {
+                    "dataset_name": dataset_name,
+                    "dataset_path": str(dataset_path),
+                    "split": split,
+                    "index": out_idx,
+                    "gpu": str(gpu_id),
+                    "rank": rank,
+                    "world_size": world_size,
+                    "elapsed_sec": elapsed,
+                    "tot": out,
+                }
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                processed += 1
             f.flush()
-            processed += 1
-            if processed % 5 == 0:
-                print(f"[collect_tot][gpu={gpu_id}] processed={processed} (last_idx={idx})")
+            _bump_progress(len(batch_indices))
+            batch_samples = []
+            batch_indices = []
+
+        if batch_samples:
+            t0 = time.time()
+            outputs = run_llama_tot_on_batch(
+                samples=batch_samples,
+                model_dir=model_dir,
+                num_step_candidates=branches,
+                rollouts_per_candidate=rollouts_per_candidate,
+                temperature=temperature,
+                use_vllm=use_vllm,
+                rollout_batch_size=rollout_batch_size,
+                num_steps=num_steps,
+            )
+            elapsed = time.time() - t0
+            for out_idx, out in zip(batch_indices, outputs):
+                record = {
+                    "dataset_name": dataset_name,
+                    "dataset_path": str(dataset_path),
+                    "split": split,
+                    "index": out_idx,
+                    "gpu": str(gpu_id),
+                    "rank": rank,
+                    "world_size": world_size,
+                    "elapsed_sec": elapsed,
+                    "tot": out,
+                }
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                processed += 1
+            f.flush()
+            _bump_progress(len(batch_indices))
 
 
 def merge_jsonl(
@@ -412,6 +523,12 @@ def parse_args() -> argparse.Namespace:
         default=16,
         help="vLLM rollout stage batch size (default: 16).",
     )
+    parser.add_argument(
+        "--sample-batch-size",
+        type=int,
+        default=1,
+        help="How many samples to process in parallel per GPU (default: 1).",
+    )
 
     parser.add_argument(
         "--gpus",
@@ -515,6 +632,18 @@ def main() -> None:
             )
 
     ctx = get_context("spawn")
+    manager = Manager()
+    progress_counter = manager.Value("i", 0)
+    progress_lock = manager.Lock()
+    progress_total = None
+    if selected is not None:
+        progress_total = len(selected)
+    else:
+        try:
+            if args.max_samples is not None:
+                progress_total = int(args.max_samples)
+        except Exception:
+            progress_total = None
     procs = []
     for rank, gpu_id in enumerate(gpus):
         out_path = output_dir / f"{output_prefix}.gpu{gpu_id}.jsonl"
@@ -539,6 +668,11 @@ def main() -> None:
                 "use_vllm": args.use_vllm,
                 "rollout_batch_size": args.rollout_batch_size,
                 "num_steps": args.num_steps,
+                "sample_batch_size": args.sample_batch_size,
+                "progress_total": progress_total,
+                "progress_counter": progress_counter,
+                "progress_lock": progress_lock,
+                "progress_rank0": rank == 0,
             },
         )
         p.start()
