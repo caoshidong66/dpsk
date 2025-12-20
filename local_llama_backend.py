@@ -5,6 +5,7 @@ modules can reuse the same cached engine without re-loading the model.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Union
@@ -38,4 +39,5 @@ def get_vllm_engine(model_dir_str: str):
             "Install it via `pip install vllm`."
         ) from exc
 
+    os.environ.setdefault("VLLM_USE_FAST_TOKENIZER", "1")
     return LLM(model=model_dir_str, dtype="bfloat16")

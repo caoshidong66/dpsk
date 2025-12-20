@@ -199,34 +199,16 @@ def _worker_main(
     progress_total: Optional[int],
     progress_counter,
     progress_lock,
-    progress_rank0: bool,
 ) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
     out_fp = Path(output_path)
     out_fp.parent.mkdir(parents=True, exist_ok=True)
-    def _progress_line(processed_count: int, total_count: Optional[int]) -> None:
-        if not progress_rank0:
-            return
-        if total_count is None or total_count <= 0:
-            msg = f"[collect_tot] processed={processed_count}"
-        else:
-            msg = (
-                f"[collect_tot] processed={processed_count}/{total_count} "
-                f"({processed_count / total_count:.1%})"
-            )
-        print("\r" + msg, end="", flush=True)
-
-    def _finish_progress() -> None:
-        if progress_rank0:
-            print("", flush=True)
-
     def _bump_progress(delta: int) -> None:
         if progress_counter is None:
             return
         with progress_lock:
             progress_counter.value += delta
-            _progress_line(progress_counter.value, progress_total)
 
     def _estimate_total_samples() -> Optional[int]:
         if max_samples is not None:
@@ -695,12 +677,29 @@ def main() -> None:
                 "progress_total": progress_total,
                 "progress_counter": progress_counter,
                 "progress_lock": progress_lock,
-                "progress_rank0": rank == 0,
             },
         )
         p.start()
         procs.append(p)
         print(f"[collect_tot] started rank={rank} gpu={gpu_id} -> {out_path}")
+
+    last_print = 0.0
+    while any(p.is_alive() for p in procs):
+        now = time.time()
+        if now - last_print >= 2.0:
+            with progress_lock:
+                processed = progress_counter.value
+            if progress_total is None or progress_total <= 0:
+                msg = f"[collect_tot] processed={processed}"
+            else:
+                msg = (
+                    f"[collect_tot] processed={processed}/{progress_total} "
+                    f"({processed / progress_total:.1%})"
+                )
+            print("\r" + msg, end="", flush=True)
+            last_print = now
+        time.sleep(0.2)
+    print("", flush=True)
 
     for p in procs:
         p.join()
