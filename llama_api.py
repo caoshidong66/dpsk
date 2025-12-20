@@ -69,11 +69,15 @@ def llama_completion(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
     ]
-    chat_prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
+    if getattr(tokenizer, "chat_template", None):
+        chat_prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+    else:
+        # Fallback for tokenizers without chat_template.
+        chat_prompt = system_prompt + "\n\n" + prompt
     if generation_prefix:
         if not chat_prompt.rstrip().endswith(generation_prefix):
             chat_prompt += generation_prefix

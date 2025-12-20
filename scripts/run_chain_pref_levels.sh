@@ -50,8 +50,7 @@ for level in 1 2 3 4 5; do
     --model-dir "${MODEL_DIR}" \
     --gpus "${GPU_IDS}" \
     --cot-batch-size 4 \
-    --only-cot \
-    --no-vllm-for-cot)"
+    --only-cot)"
   echo "${base_out}"
   base_json="$(echo "${base_out}" | tail -n 1)"
   echo "{\"level\":${level},\"model\":\"base\",\"result\":${base_json}}" >> "${RESULTS_FILE}"
@@ -67,8 +66,7 @@ for level in 1 2 3 4 5; do
     --reuse-merged \
     --gpus "${GPU_IDS}" \
     --cot-batch-size 4 \
-    --only-cot \
-    --no-vllm-for-cot)"
+    --only-cot)"
   echo "${lora_out}"
   lora_json="$(echo "${lora_out}" | tail -n 1)"
   echo "{\"level\":${level},\"model\":\"lora\",\"result\":${lora_json}}" >> "${RESULTS_FILE}"
