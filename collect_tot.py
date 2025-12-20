@@ -636,19 +636,37 @@ def main() -> None:
                 allowed_types=allowed_types,
             )
 
+    def _estimate_total_samples_main() -> Optional[int]:
+        if args.max_samples is not None:
+            try:
+                max_samples_i = int(args.max_samples)
+                if max_samples_i > 0:
+                    return max_samples_i
+            except Exception:
+                pass
+        try:
+            if args.dataset_name == "gsm8k":
+                base = Path(dataset_path)
+                file_path = base / f"{args.split}.jsonl" if base.is_dir() else base
+                with file_path.open("r", encoding="utf-8") as f_count:
+                    return sum(1 for _ in f_count)
+            if args.dataset_name == "svamp":
+                path = Path(dataset_path)
+                with path.open("r", encoding="utf-8") as f_count:
+                    data = json.load(f_count)
+                if isinstance(data, list):
+                    return len(data)
+                if isinstance(data, dict) and isinstance(data.get("data"), list):
+                    return len(data["data"])
+        except Exception:
+            return None
+        return None
+
     ctx = get_context("spawn")
     manager = Manager()
     progress_counter = manager.Value("i", 0)
     progress_lock = manager.Lock()
-    progress_total = None
-    if selected is not None:
-        progress_total = len(selected)
-    else:
-        try:
-            if args.max_samples is not None:
-                progress_total = int(args.max_samples)
-        except Exception:
-            progress_total = None
+    progress_total = len(selected) if selected is not None else _estimate_total_samples_main()
     procs = []
     for rank, gpu_id in enumerate(gpus):
         out_path = output_dir / f"{output_prefix}.gpu{gpu_id}.jsonl"
