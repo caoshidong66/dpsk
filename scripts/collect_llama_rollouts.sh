@@ -6,6 +6,8 @@ GPUS="0,1,2,3,4,5,6,7"
 OUT_ROOT="datas/llama"
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
+GSM8K_MAX=7300
+SVAMP_MAX=1000
 
 mkdir -p "${OUT_ROOT}"
 
@@ -19,6 +21,7 @@ python collect_tot.py \
   --output-prefix gsm8k_tot \
   --sample-batch-size 8 \
   --rollout-batch-size 100 \
+  --max-samples "${GSM8K_MAX}" \
   --merge
 
 python collect_tot.py \
@@ -30,4 +33,5 @@ python collect_tot.py \
   --output-prefix svamp_tot \
   --sample-batch-size 8 \
   --rollout-batch-size 100 \
+  --max-samples "${SVAMP_MAX}" \
   --merge
