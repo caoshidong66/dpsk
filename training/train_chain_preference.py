@@ -883,6 +883,8 @@ def main() -> None:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
 
     if args.eval_after_train:
+        if using_ddp:
+            dist.barrier()
         if accelerator is None and (not using_ddp or dist.get_rank() == 0):
             print("[chain_pref] running eval-after-train...")
         if accelerator is not None and accelerator.is_main_process:
@@ -1043,6 +1045,8 @@ def main() -> None:
             if not using_ddp or dist.get_rank() == 0:
                 eval_summary = _run_eval()
                 print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
+            if using_ddp:
+                dist.barrier()
 
     out_dir = Path(args.output_dir)
     if getattr(args, "use_lora", False):
