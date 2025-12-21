@@ -66,6 +66,8 @@ from lora_utils import (
     freeze_model,
     trainable_parameters,
 )
+from dataset_utils import iter_samples, normalize_sample, default_dataset_path
+from tool import is_model_correct, steps_for_dataset, steps_for_level
 
 
 class ChainPrefDataset(Dataset):
@@ -574,6 +576,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Require ref_good_logprobs/ref_bad_logprobs in the loaded records; errors if missing.",
     )
+    parser.add_argument(
+        "--eval-after-train",
+        action="store_true",
+        help="Run an evaluation pass immediately after training using the in-memory model.",
+    )
+    parser.add_argument(
+        "--eval-num-samples",
+        type=int,
+        default=None,
+        help="If set, evaluate on this many samples; otherwise evaluate the full split.",
+    )
     add_lora_args(parser, default_r=8, default_target_modules="q_proj,v_proj")
     return parser.parse_args()
 
@@ -856,6 +869,118 @@ def main() -> None:
                         print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
                 elif accelerator.is_main_process:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
+
+    if args.eval_after_train:
+        if accelerator is None and (not using_ddp or dist.get_rank() == 0):
+            print("[chain_pref] running eval-after-train...")
+        if accelerator is not None and accelerator.is_main_process:
+            print("[chain_pref] running eval-after-train...")
+
+        eval_dataset_name = "hendrycks_math"
+        eval_split = "test"
+        eval_level = None
+        if args.tot_jsonl:
+            lower = str(args.tot_jsonl).lower()
+            if "gsm8k" in lower:
+                eval_dataset_name = "gsm8k"
+            elif "svamp" in lower:
+                eval_dataset_name = "svamp"
+            elif "hendrycks" in lower or "math" in lower:
+                eval_dataset_name = "hendrycks_math"
+                for lvl in ["l1", "l2", "l3", "l4", "l5"]:
+                    if f"_{lvl}" in lower or f"{lvl}" in lower:
+                        try:
+                            eval_level = int(lvl[-1])
+                        except ValueError:
+                            eval_level = None
+                        break
+
+        eval_root = default_dataset_path(eval_dataset_name)
+
+        def _iter_eval_samples():
+            count = 0
+            for raw in iter_samples(eval_dataset_name, eval_root, split=eval_split):
+                sample = normalize_sample(eval_dataset_name, raw)
+                if eval_dataset_name == "hendrycks_math" and eval_level is not None:
+                    lvl = sample.get("level")
+                    if isinstance(lvl, str):
+                        if str(eval_level) not in lvl:
+                            continue
+                    elif isinstance(lvl, int):
+                        if int(lvl) != eval_level:
+                            continue
+                    else:
+                        continue
+                yield sample
+                count += 1
+                if args.eval_num_samples is not None and count >= int(args.eval_num_samples):
+                    break
+
+        def _run_eval():
+            correct = 0
+            total = 0
+            for sample in _iter_eval_samples():
+                problem = (
+                    sample.get("problem")
+                    or sample.get("question")
+                    or sample.get("prompt")
+                )
+                if not problem:
+                    continue
+                solution = sample.get("solution") or sample.get("answer")
+                level = sample.get("level")
+                if eval_dataset_name in {"gsm8k", "svamp"}:
+                    num_steps = steps_for_dataset(eval_dataset_name)
+                else:
+                    num_steps = steps_for_level(level)
+                prompt = (
+                    "You are an expert math problem solver. "
+                    "You must reason step by step and avoid logical or arithmetic mistakes.\n\n"
+                    "Solve the following math problem.\n"
+                    f"You MUST use exactly {num_steps} reasoning steps, "
+                    "After the reasoning, output the final answer in the last line "
+                    "using the format: `Answer: <final_answer>`.\n\n"
+                    f"Problem: {problem}\n\n"
+                    "Reasoning step by step:\n"
+                    "Step 1:"
+                )
+                encoded = tokenizer(prompt, return_tensors="pt")
+                input_ids = encoded["input_ids"].to(device)
+                attention_mask = encoded.get("attention_mask")
+                if attention_mask is not None:
+                    attention_mask = attention_mask.to(device)
+                with torch.no_grad():
+                    output_ids = model.generate(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=512,
+                        do_sample=True,
+                        temperature=0.2,
+                        top_p=0.95,
+                        pad_token_id=tokenizer.eos_token_id,
+                    )
+                generated = output_ids[0, input_ids.shape[1] :]
+                completion = tokenizer.decode(generated, skip_special_tokens=True)
+                is_correct_flag = False
+                if solution is not None:
+                    is_correct_flag = is_model_correct(completion, solution)
+                if is_correct_flag:
+                    correct += 1
+                total += 1
+                if total % 10 == 0:
+                    print(f"[chain_pref][eval] processed {total}")
+            acc = (correct / total) if total > 0 else None
+            return {"num_samples": total, "num_correct": correct, "accuracy": acc}
+
+        if accelerator is not None:
+            if accelerator.is_main_process:
+                eval_summary = _run_eval()
+                print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
+            accelerator.wait_for_everyone()
+        else:
+            if not using_ddp or dist.get_rank() == 0:
+                eval_summary = _run_eval()
+                print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
 
     out_dir = Path(args.output_dir)
     if getattr(args, "use_lora", False):
