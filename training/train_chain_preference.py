@@ -1011,7 +1011,8 @@ def main() -> None:
                 if attention_mask is not None:
                     attention_mask = attention_mask.to(device)
                 with torch.no_grad():
-                    output_ids = model.generate(
+                    gen_model = model.module if using_ddp else model
+                    output_ids = gen_model.generate(
                         input_ids,
                         attention_mask=attention_mask,
                         max_new_tokens=512,
