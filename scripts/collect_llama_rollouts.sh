@@ -1,37 +1,57 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_DIR="../model/Meta-Llama-3-8B"
+MODEL_ROOT="../model"
+MODELS=(
+  "Meta-Llama-3-8B-Instruct"
+  "Qwen3-4B-Instruct-2507"
+  "Qwen3-8B"
+)
 GPUS="0,1,2,3,4,5,6,7"
-OUT_ROOT="datas/llama"
+OUT_ROOT="datas"
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
-GSM8K_MAX=7300
-SVAMP_MAX=1000
+MATH_PATH="../data/hendrycks_math"
 
 mkdir -p "${OUT_ROOT}"
 
-python collect_tot.py \
-  --dataset-name gsm8k \
-  --dataset-path "${GSM8K_PATH}" \
-  --split train \
-  --gpus "${GPUS}" \
-  --model-dir "${MODEL_DIR}" \
-  --output-dir "${OUT_ROOT}/gsm8k" \
-  --output-prefix gsm8k_tot \
-  --sample-batch-size 24 \
-  --rollout-batch-size 300 \
-  --max-samples "${GSM8K_MAX}" \
-  --merge
+for model_name in "${MODELS[@]}"; do
+  model_dir="${MODEL_ROOT}/${model_name}"
+  model_out="${OUT_ROOT}/${model_name}"
+  mkdir -p "${model_out}"
 
-python collect_tot.py \
-  --dataset-name svamp \
-  --dataset-path "${SVAMP_PATH}" \
-  --gpus "${GPUS}" \
-  --model-dir "${MODEL_DIR}" \
-  --output-dir "${OUT_ROOT}/svamp" \
-  --output-prefix svamp_tot \
-  --sample-batch-size 24 \
-  --rollout-batch-size 300 \
-  --max-samples "${SVAMP_MAX}" \
-  --merge
+  python collect_tot.py \
+    --dataset-name gsm8k \
+    --dataset-path "${GSM8K_PATH}" \
+    --split train \
+    --gpus "${GPUS}" \
+    --model-dir "${model_dir}" \
+    --output-dir "${model_out}/gsm8k" \
+    --output-prefix gsm8k_tot \
+    --sample-batch-size 24 \
+    --rollout-batch-size 300 \
+    --merge
+
+  python collect_tot.py \
+    --dataset-name svamp \
+    --dataset-path "${SVAMP_PATH}" \
+    --gpus "${GPUS}" \
+    --model-dir "${model_dir}" \
+    --output-dir "${model_out}/svamp" \
+    --output-prefix svamp_tot \
+    --sample-batch-size 24 \
+    --rollout-batch-size 300 \
+    --merge
+
+  python collect_tot.py \
+    --dataset-name hendrycks_math \
+    --dataset-path "${MATH_PATH}" \
+    --split train \
+    --gpus "${GPUS}" \
+    --model-dir "${model_dir}" \
+    --output-dir "${model_out}/math" \
+    --output-prefix math_tot \
+    --sample-batch-size 24 \
+    --rollout-batch-size 300 \
+    --merge
+done
