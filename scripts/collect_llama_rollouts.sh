@@ -3,7 +3,7 @@ set -euo pipefail
 
 MODEL_ROOT="../model"
 MODELS=(
-  "Meta-Llama-3-8B-Instruct"
+  "Meta-Llama-3-8B"
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
@@ -19,6 +19,10 @@ for model_name in "${MODELS[@]}"; do
   model_dir="${MODEL_ROOT}/${model_name}"
   model_out="${OUT_ROOT}/${model_name}"
   mkdir -p "${model_out}"
+  use_vllm_args=()
+  if [[ "${model_name}" == Qwen3-* ]]; then
+    use_vllm_args=(--no-vllm)
+  fi
 
   python collect_tot.py \
     --dataset-name gsm8k \
@@ -29,7 +33,9 @@ for model_name in "${MODELS[@]}"; do
     --output-dir "${model_out}/gsm8k" \
     --output-prefix gsm8k_tot \
     --sample-batch-size 16 \
+    --rollouts-per-candidate 8 \
     --rollout-batch-size 200 \
+    "${use_vllm_args[@]}" \
     --merge
 
   python collect_tot.py \
@@ -40,7 +46,9 @@ for model_name in "${MODELS[@]}"; do
     --output-dir "${model_out}/svamp" \
     --output-prefix svamp_tot \
     --sample-batch-size 16 \
+    --rollouts-per-candidate 8 \
     --rollout-batch-size 200 \
+    "${use_vllm_args[@]}" \
     --merge
 
   python collect_tot.py \
@@ -52,6 +60,8 @@ for model_name in "${MODELS[@]}"; do
     --output-dir "${model_out}/math" \
     --output-prefix math_tot \
     --sample-batch-size 16 \
+    --rollouts-per-candidate 8 \
     --rollout-batch-size 200 \
+    "${use_vllm_args[@]}" \
     --merge
 done
