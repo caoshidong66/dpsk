@@ -464,6 +464,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    os.environ.setdefault("VLLM_USE_FAST_TOKENIZER", "1")
+    os.environ.setdefault("TRANSFORMERS_USE_FAST", "1")
+
     if args.lora_dir:
         if not args.model_dir:
             raise ValueError("--lora-dir requires --model-dir (base model directory).")
