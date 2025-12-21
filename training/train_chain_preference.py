@@ -882,12 +882,20 @@ def main() -> None:
                 elif accelerator.is_main_process:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
 
+    def _unwrap_ddp(m):
+        return m.module if isinstance(m, DDP) else m
+
     if args.eval_after_train:
         if using_ddp:
-            dist.barrier()
-        if accelerator is None and (not using_ddp or dist.get_rank() == 0):
+            rank = dist.get_rank()
+            if rank != 0:
+                dist.destroy_process_group()
+                return
+            dist.destroy_process_group()
+            using_ddp = False
+        if accelerator is None:
             print("[chain_pref] running eval-after-train...")
-        if accelerator is not None and accelerator.is_main_process:
+        elif accelerator.is_main_process:
             print("[chain_pref] running eval-after-train...")
 
         eval_dataset_name = "hendrycks_math"
@@ -1013,7 +1021,7 @@ def main() -> None:
                 if attention_mask is not None:
                     attention_mask = attention_mask.to(device)
                 with torch.no_grad():
-                    gen_model = model.module if using_ddp else model
+                    gen_model = _unwrap_ddp(model)
                     output_ids = gen_model.generate(
                         input_ids,
                         attention_mask=attention_mask,
@@ -1042,11 +1050,8 @@ def main() -> None:
                 print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
             accelerator.wait_for_everyone()
         else:
-            if not using_ddp or dist.get_rank() == 0:
-                eval_summary = _run_eval()
-                print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
-            if using_ddp:
-                dist.barrier()
+            eval_summary = _run_eval()
+            print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
 
     out_dir = Path(args.output_dir)
     if getattr(args, "use_lora", False):
@@ -1065,14 +1070,10 @@ def main() -> None:
             tokenizer.save_pretrained(str(out_dir))
             print(f"[chain_pref] saved -> {out_dir}")
     else:
-        if not using_ddp or dist.get_rank() == 0:
-            to_save = model.module if using_ddp else model
-            to_save.save_pretrained(str(out_dir))
-            tokenizer.save_pretrained(str(out_dir))
-            print(f"[chain_pref] saved -> {out_dir}")
-        if using_ddp:
-            dist.barrier()
-            dist.destroy_process_group()
+        to_save = _unwrap_ddp(model)
+        to_save.save_pretrained(str(out_dir))
+        tokenizer.save_pretrained(str(out_dir))
+        print(f"[chain_pref] saved -> {out_dir}")
 
 
 if __name__ == "__main__":

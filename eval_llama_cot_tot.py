@@ -4,10 +4,11 @@ import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from cot_math import _load_one_hendrycks_sample  # type: ignore
+from cot_math import _load_one_hendrycks_sample, build_completion_prompt  # type: ignore
 from dataset_utils import iter_samples, normalize_sample
 from llama_cot_math import run_llama_cot_on_batch, run_llama_cot_on_single
 from llama_tot_math import run_llama_tot_on_batch, run_llama_tot_on_single
+from tool import is_model_correct, steps_for_dataset, steps_for_level
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_ID_DIR = _REPO_ROOT / "datas" / "eval_ids"
@@ -290,6 +291,8 @@ def _worker_eval_one_shard(
     gpu_id: Optional[str],
     samples: List[Dict[str, Any]],
     model_dir: Optional[Union[str, Path]],
+    lora_dir: Optional[str],
+    lora_no_merge: bool,
     use_vllm_for_cot: bool,
     use_vllm_for_tot: bool,
     branches: int,
@@ -306,6 +309,104 @@ def _worker_eval_one_shard(
     """
     if gpu_id is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+
+    if lora_no_merge and lora_dir:
+        if use_vllm_for_cot:
+            raise ValueError("--lora-no-merge requires --no-vllm-for-cot.")
+        if run_tot:
+            raise ValueError("--lora-no-merge only supports CoT evaluation.")
+
+        try:
+            import torch
+            from peft import PeftModel  # type: ignore
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError("LoRA eval requires peft/transformers.") from exc
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        base = AutoModelForCausalLM.from_pretrained(
+            str(model_dir),
+            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        )
+        base.to(device)
+        model = PeftModel.from_pretrained(base, lora_dir)
+        model.eval()
+        tokenizer = AutoTokenizer.from_pretrained(str(model_dir), use_fast=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        correct = 0
+        results: List[Dict[str, Any]] = []
+        for idx, sample in enumerate(samples):
+            problem = (
+                sample.get("problem")
+                or sample.get("question")
+                or sample.get("prompt")
+            )
+            if not problem:
+                continue
+            level = sample.get("level")
+            num_steps = (
+                steps_for_dataset("gsm8k")
+                if sample.get("dataset_name") == "gsm8k"
+                else steps_for_level(level)
+            )
+            prompt = build_completion_prompt(problem, num_steps=num_steps)
+            encoded = tokenizer(prompt, return_tensors="pt")
+            input_ids = encoded["input_ids"].to(device)
+            attention_mask = encoded.get("attention_mask")
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(device)
+            with torch.no_grad():
+                output_ids = model.generate(
+                    input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=512,
+                    do_sample=True,
+                    temperature=0.2,
+                    top_p=0.95,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+            generated = output_ids[0, input_ids.shape[1] :]
+            completion = tokenizer.decode(generated, skip_special_tokens=True)
+            solution = sample.get("solution") or sample.get("answer")
+            is_correct_flag = False
+            if solution is not None:
+                is_correct_flag = is_model_correct(completion, solution)
+            if is_correct_flag:
+                correct += 1
+            results.append(
+                {
+                    "prompt": prompt,
+                    "completion": completion,
+                    "is_correct": is_correct_flag,
+                    "problem": problem,
+                    "level": level,
+                    "raw_sample": sample,
+                }
+            )
+            if (idx + 1) % 10 == 0:
+                print(f"[eval][lora] processed {idx + 1}/{len(samples)}")
+
+        n = len(results)
+        cot_eval = {
+            "summary": {
+                "num_samples": n,
+                "num_correct": correct,
+                "accuracy": correct / n if n > 0 else None,
+            },
+            "details": results,
+        }
+        tot_eval = {
+            "summary": {
+                "num_samples": 0,
+                "num_correct": 0,
+                "accuracy": None,
+                "skipped": True,
+            },
+            "details": [],
+        }
+        return cot_eval, tot_eval
 
     return evaluate_cot_and_tot_on_samples(
         samples=samples,
@@ -370,6 +471,11 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="LoRA adapter 权重目录；提供后会自动 merge 到 base 模型。",
+    )
+    parser.add_argument(
+        "--lora-no-merge",
+        action="store_true",
+        help="Use transformers+PEFT for LoRA eval without merging (requires --no-vllm-for-cot).",
     )
     parser.add_argument(
         "--merged-model-dir",
@@ -467,7 +573,12 @@ if __name__ == "__main__":
     os.environ.setdefault("VLLM_USE_FAST_TOKENIZER", "1")
     os.environ.setdefault("TRANSFORMERS_USE_FAST", "1")
 
-    if args.lora_dir:
+    if args.lora_dir and args.lora_no_merge:
+        if args.use_vllm_for_cot:
+            raise ValueError("--lora-no-merge requires --no-vllm-for-cot.")
+        if args.use_vllm_for_tot:
+            raise ValueError("--lora-no-merge only supports CoT.")
+    if args.lora_dir and not args.lora_no_merge:
         if not args.model_dir:
             raise ValueError("--lora-dir requires --model-dir (base model directory).")
         base_model_dir = Path(args.model_dir)
@@ -543,19 +654,22 @@ if __name__ == "__main__":
         only_gpu = gpu_ids[0]
         if only_gpu is not None:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(only_gpu)
-        cot_eval, tot_eval = evaluate_cot_and_tot_on_samples(
-            samples=samples,
-            model_dir=args.model_dir,
-            use_vllm_for_cot=args.use_vllm_for_cot,
-            use_vllm_for_tot=args.use_vllm_for_tot,
-            branches=args.branches,
-            rollouts_per_candidate=args.rollouts_per_candidate,
-            rollout_batch_size=args.rollout_batch_size,
-            temperature=args.temperature,
-            cot_batch_size=args.cot_batch_size,
-            tot_batch_size=args.tot_batch_size,
-            run_cot=True,
-            run_tot=not args.only_cot,
+        cot_eval, tot_eval = _worker_eval_one_shard(
+            only_gpu,
+            samples,
+            args.model_dir,
+            args.lora_dir,
+            args.lora_no_merge,
+            args.use_vllm_for_cot,
+            args.use_vllm_for_tot,
+            args.branches,
+            args.rollouts_per_candidate,
+            args.rollout_batch_size,
+            args.temperature,
+            args.cot_batch_size,
+            args.tot_batch_size,
+            True,
+            not args.only_cot,
         )
     else:
         # 切 shard
@@ -592,6 +706,8 @@ if __name__ == "__main__":
                         gpu_id,
                         shard,
                         args.model_dir,
+                        args.lora_dir,
+                        args.lora_no_merge,
                         args.use_vllm_for_cot,
                         args.use_vllm_for_tot,
                         args.branches,
