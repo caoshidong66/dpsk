@@ -576,7 +576,7 @@ if __name__ == "__main__":
     if args.lora_dir and args.lora_no_merge:
         if args.use_vllm_for_cot:
             raise ValueError("--lora-no-merge requires --no-vllm-for-cot.")
-        if args.use_vllm_for_tot:
+        if (not args.only_cot) and args.use_vllm_for_tot:
             raise ValueError("--lora-no-merge only supports CoT.")
     if args.lora_dir and not args.lora_no_merge:
         if not args.model_dir:
