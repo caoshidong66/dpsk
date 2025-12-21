@@ -593,6 +593,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional JSON cache of eval indices (e.g. datas/eval_ids/hendrycks_level1_test_300.json).",
     )
+    parser.add_argument(
+        "--eval-dataset-root",
+        type=str,
+        default=None,
+        help="Override evaluation dataset root path (defaults to dataset_utils defaults).",
+    )
     add_lora_args(parser, default_r=8, default_target_modules="q_proj,v_proj")
     return parser.parse_args()
 
@@ -902,7 +908,7 @@ def main() -> None:
                             eval_level = None
                         break
 
-        eval_root = default_dataset_path(eval_dataset_name)
+        eval_root = args.eval_dataset_root or default_dataset_path(eval_dataset_name)
 
         def _load_eval_indices() -> Optional[List[int]]:
             cache_path = None

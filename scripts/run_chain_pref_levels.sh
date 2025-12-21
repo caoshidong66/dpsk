@@ -42,7 +42,8 @@ for level in 1 2 3 4 5; do
     --learning-rate 1e-5 \
     --eval-after-train \
     --eval-num-samples "${NUM_SAMPLES}" \
-    --eval-id-cache "datas/eval_ids/hendrycks_level${level}_test_${NUM_SAMPLES}.json"
+    --eval-id-cache "datas/eval_ids/hendrycks_level${level}_test_${NUM_SAMPLES}.json" \
+    --eval-dataset-root "${DATA_ROOT}"
 
   echo "[run] level ${level}: eval base (CoT only)"
   base_out="$(python eval_llama_cot_tot.py \

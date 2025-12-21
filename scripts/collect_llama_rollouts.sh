@@ -28,8 +28,8 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/gsm8k" \
     --output-prefix gsm8k_tot \
-    --sample-batch-size 24 \
-    --rollout-batch-size 300 \
+    --sample-batch-size 16 \
+    --rollout-batch-size 200 \
     --merge
 
   python collect_tot.py \
@@ -39,8 +39,8 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/svamp" \
     --output-prefix svamp_tot \
-    --sample-batch-size 24 \
-    --rollout-batch-size 300 \
+    --sample-batch-size 16 \
+    --rollout-batch-size 200 \
     --merge
 
   python collect_tot.py \
@@ -51,7 +51,7 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/math" \
     --output-prefix math_tot \
-    --sample-batch-size 24 \
-    --rollout-batch-size 300 \
+    --sample-batch-size 16 \
+    --rollout-batch-size 200 \
     --merge
 done
