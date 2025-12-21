@@ -105,7 +105,7 @@ def _merge_lora_adapter(
     output_dir.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(output_dir))
     try:
-        tokenizer = AutoTokenizer.from_pretrained(str(base_model_dir), use_fast=False)
+        tokenizer = AutoTokenizer.from_pretrained(str(base_model_dir), use_fast=True)
         tokenizer.save_pretrained(str(output_dir))
     except Exception:
         pass

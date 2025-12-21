@@ -40,4 +40,4 @@ def get_vllm_engine(model_dir_str: str):
         ) from exc
 
     os.environ.setdefault("VLLM_USE_FAST_TOKENIZER", "1")
-    return LLM(model=model_dir_str, dtype="bfloat16")
+    return LLM(model=model_dir_str, dtype="bfloat16", tokenizer_mode="auto")
