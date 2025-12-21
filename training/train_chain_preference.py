@@ -587,6 +587,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="If set, evaluate on this many samples; otherwise evaluate the full split.",
     )
+    parser.add_argument(
+        "--eval-id-cache",
+        type=str,
+        default=None,
+        help="Optional JSON cache of eval indices (e.g. datas/eval_ids/hendrycks_level1_test_300.json).",
+    )
     add_lora_args(parser, default_r=8, default_target_modules="q_proj,v_proj")
     return parser.parse_args()
 
@@ -879,6 +885,7 @@ def main() -> None:
         eval_dataset_name = "hendrycks_math"
         eval_split = "test"
         eval_level = None
+        eval_id_cache = args.eval_id_cache
         if args.tot_jsonl:
             lower = str(args.tot_jsonl).lower()
             if "gsm8k" in lower:
@@ -897,8 +904,56 @@ def main() -> None:
 
         eval_root = default_dataset_path(eval_dataset_name)
 
+        def _load_eval_indices() -> Optional[List[int]]:
+            cache_path = None
+            if eval_id_cache:
+                cache_path = Path(eval_id_cache)
+            elif eval_dataset_name == "hendrycks_math" and eval_level is not None and args.eval_num_samples:
+                default_cache = (
+                    _REPO_ROOT
+                    / "datas"
+                    / "eval_ids"
+                    / f"hendrycks_level{eval_level}_{eval_split}_{int(args.eval_num_samples)}.json"
+                )
+                if default_cache.exists():
+                    cache_path = default_cache
+            if cache_path is None:
+                return None
+            if not cache_path.exists():
+                raise FileNotFoundError(f"--eval-id-cache not found: {cache_path}")
+            with cache_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            indices = data.get("indices") if isinstance(data, dict) else None
+            if not isinstance(indices, list) or not all(isinstance(i, int) for i in indices):
+                raise ValueError(f"Invalid eval id cache format: {cache_path}")
+            if args.eval_num_samples is not None:
+                return indices[: int(args.eval_num_samples)]
+            return indices
+
+        eval_indices = _load_eval_indices()
+
         def _iter_eval_samples():
             count = 0
+            if eval_indices is not None:
+                wanted = set(eval_indices)
+                collected: Dict[int, Dict[str, object]] = {}
+                for idx, raw in enumerate(iter_samples(eval_dataset_name, eval_root, split=eval_split)):
+                    if idx not in wanted:
+                        continue
+                    sample = normalize_sample(eval_dataset_name, raw)
+                    collected[idx] = sample
+                    if len(collected) >= len(wanted):
+                        break
+                for idx in eval_indices:
+                    sample = collected.get(idx)
+                    if sample is None:
+                        continue
+                    yield sample
+                    count += 1
+                    if args.eval_num_samples is not None and count >= int(args.eval_num_samples):
+                        break
+                return
+
             for raw in iter_samples(eval_dataset_name, eval_root, split=eval_split):
                 sample = normalize_sample(eval_dataset_name, raw)
                 if eval_dataset_name == "hendrycks_math" and eval_level is not None:
