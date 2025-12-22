@@ -8,7 +8,7 @@ MODELS=(
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
-GPUS="3,4,5,6"
+GPUS="2,3,4,5"
 VLLM_TP_SIZE=4
 OUT_ROOT="datas_300"
 GSM8K_PATH="../data/GSM8K"
@@ -34,7 +34,7 @@ for model_name in "${MODELS[@]}"; do
     --output-prefix gsm8k_tot \
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 150 \
+    --rollout-batch-size 100 \
     --max-samples 300 \
     "${use_vllm_args[@]}" \
     --merge
@@ -49,7 +49,7 @@ for model_name in "${MODELS[@]}"; do
     --output-prefix svamp_tot \
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 150 \
+    --rollout-batch-size 100 \
     --max-samples 300 \
     "${use_vllm_args[@]}" \
     --merge
@@ -65,7 +65,7 @@ for model_name in "${MODELS[@]}"; do
     --output-prefix math_tot \
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 150 \
+    --rollout-batch-size 100 \
     --max-samples 300 \
     "${use_vllm_args[@]}" \
     --merge
