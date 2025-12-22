@@ -11,6 +11,7 @@ MODELS=(
 GPUS="2,3,4,5"
 VLLM_TP_SIZE=4
 OUT_ROOT="datas_300"
+export VLLM_GPU_MEMORY_UTILIZATION=0.5
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
 MATH_PATH="../data/hendrycks_math"
