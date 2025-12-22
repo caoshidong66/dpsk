@@ -12,7 +12,6 @@ from tool import is_model_correct, steps_for_dataset, steps_for_level
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_ID_DIR = _REPO_ROOT / "datas" / "eval_ids"
-_DEFAULT_MERGED_DIR = _REPO_ROOT / "datas" / "merged_models"
 
 
 def _resolve_gpu_ids(user_spec: Optional[str]) -> List[Optional[str]]:
@@ -73,45 +72,6 @@ def _parse_level(value: object) -> Optional[int]:
         except ValueError:
             return None
     return None
-
-
-def _merge_lora_adapter(
-    base_model_dir: Path,
-    lora_dir: Path,
-    output_dir: Path,
-    *,
-    reuse_if_exists: bool,
-) -> Path:
-    if reuse_if_exists and (output_dir / "config.json").exists():
-        return output_dir
-
-    try:
-        import torch
-        from peft import PeftModel  # type: ignore
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-    except Exception as exc:
-        raise RuntimeError(
-            "Merging LoRA requires `peft` and `transformers` to be installed."
-        ) from exc
-
-    base = AutoModelForCausalLM.from_pretrained(
-        str(base_model_dir),
-        torch_dtype=torch.float32,
-        device_map="cpu",
-        low_cpu_mem_usage=True,
-    )
-    model = PeftModel.from_pretrained(base, str(lora_dir))
-    model = model.merge_and_unload()
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(str(output_dir))
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(str(base_model_dir), use_fast=True)
-        tokenizer.save_pretrained(str(output_dir))
-    except Exception:
-        pass
-
-    return output_dir
 
 
 def _select_hendrycks_indices_by_level(
@@ -470,23 +430,12 @@ if __name__ == "__main__":
         "--lora-dir",
         type=str,
         default=None,
-        help="LoRA adapter 权重目录；提供后会自动 merge 到 base 模型。",
+        help="LoRA adapter 权重目录（与 --lora-no-merge 一起使用）。",
     )
     parser.add_argument(
         "--lora-no-merge",
         action="store_true",
         help="Use transformers+PEFT for LoRA eval without merging (requires --no-vllm-for-cot).",
-    )
-    parser.add_argument(
-        "--merged-model-dir",
-        type=str,
-        default=None,
-        help="merge 后的模型保存目录（默认 datas/merged_models/）。",
-    )
-    parser.add_argument(
-        "--reuse-merged",
-        action="store_true",
-        help="如果 merge 输出目录已存在则直接复用（跳过重新 merge）。",
     )
     parser.add_argument(
         "--model-dir",
@@ -579,22 +528,8 @@ if __name__ == "__main__":
         if (not args.only_cot) and args.use_vllm_for_tot:
             raise ValueError("--lora-no-merge only supports CoT.")
     if args.lora_dir and not args.lora_no_merge:
-        if not args.model_dir:
-            raise ValueError("--lora-dir requires --model-dir (base model directory).")
-        base_model_dir = Path(args.model_dir)
-        lora_dir = Path(args.lora_dir)
-        if args.merged_model_dir:
-            merged_dir = Path(args.merged_model_dir)
-        else:
-            _DEFAULT_MERGED_DIR.mkdir(parents=True, exist_ok=True)
-            merged_dir = _DEFAULT_MERGED_DIR / f"{lora_dir.name}_merged"
-        args.model_dir = str(
-            _merge_lora_adapter(
-                base_model_dir,
-                lora_dir,
-                merged_dir,
-                reuse_if_exists=args.reuse_merged,
-            )
+        raise ValueError(
+            "LoRA merge is disabled. Use --lora-no-merge with --no-vllm-for-cot."
         )
 
     ds_root = Path(args.dataset_root)

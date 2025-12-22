@@ -5,8 +5,8 @@ set -euo pipefail
 DATA_ROOT="../data/hendrycks_math"
 MODEL_DIR="../model/Meta-Llama-3-8B"
 NUM_SAMPLES=300
-GPU_IDS="0,1"
-NUM_GPUS=2
+GPU_IDS="1"
+NUM_GPUS=1
 
 declare -A TOT_JSONL
 TOT_JSONL[1]="datas/tot_math_l1/math_l1.20251215_152302.all.jsonl"
@@ -54,9 +54,26 @@ for level in 1 2 3 4 5; do
     --model-dir "${MODEL_DIR}" \
     --gpus "${GPU_IDS}" \
     --cot-batch-size 4 \
-    --only-cot)"
+    --only-cot \
+    --no-vllm-for-cot)"
   echo "${base_out}"
-  base_json="$(echo "${base_out}" | tail -n 1)"
+  base_json="$(python - <<'PY'
+import json, sys
+lines = sys.stdin.read().splitlines()
+last = None
+for line in lines:
+    line = line.strip()
+    if line.startswith("{") and line.endswith("}"):
+        try:
+            obj = json.loads(line)
+            last = line
+        except Exception:
+            continue
+if last is None:
+    last = "{}"
+print(last)
+PY
+<<< "${base_out}")"
   echo "{\"level\":${level},\"model\":\"base\",\"result\":${base_json}}" >> "${RESULTS_FILE}"
 
   echo "[run] level ${level}: eval LoRA (CoT only)"
@@ -67,11 +84,28 @@ for level in 1 2 3 4 5; do
     --num-samples "${NUM_SAMPLES}" \
     --model-dir "${MODEL_DIR}" \
     --lora-dir "${lora_dir}" \
-    --reuse-merged \
     --gpus "${GPU_IDS}" \
     --cot-batch-size 4 \
-    --only-cot)"
+    --only-cot \
+    --no-vllm-for-cot \
+    --lora-no-merge)"
   echo "${lora_out}"
-  lora_json="$(echo "${lora_out}" | tail -n 1)"
+  lora_json="$(python - <<'PY'
+import json, sys
+lines = sys.stdin.read().splitlines()
+last = None
+for line in lines:
+    line = line.strip()
+    if line.startswith("{") and line.endswith("}"):
+        try:
+            obj = json.loads(line)
+            last = line
+        except Exception:
+            continue
+if last is None:
+    last = "{}"
+print(last)
+PY
+<<< "${lora_out}")"
   echo "{\"level\":${level},\"model\":\"lora\",\"result\":${lora_json}}" >> "${RESULTS_FILE}"
 done
