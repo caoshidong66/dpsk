@@ -43,9 +43,9 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/svamp" \
     --output-prefix svamp_tot \
-    --sample-batch-size 16 \
+    --sample-batch-size 32 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 200 \
+    --rollout-batch-size 400 \
     "${use_vllm_args[@]}" \
     --merge
 
@@ -57,9 +57,9 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/math" \
     --output-prefix math_tot \
-    --sample-batch-size 16 \
+    --sample-batch-size 32 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 200 \
+    --rollout-batch-size 400 \
     "${use_vllm_args[@]}" \
     --merge
 done
