@@ -8,9 +8,9 @@ MODELS=(
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
-GPUS="4,5,6,7"
+GPUS="3,4,5,6"
 VLLM_TP_SIZE=4
-OUT_ROOT="datas"
+OUT_ROOT="datas_300"
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
 MATH_PATH="../data/hendrycks_math"
@@ -35,6 +35,7 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 150 \
+    --max-samples 300 \
     "${use_vllm_args[@]}" \
     --merge
 
@@ -49,6 +50,7 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 150 \
+    --max-samples 300 \
     "${use_vllm_args[@]}" \
     --merge
 
@@ -64,6 +66,7 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 150 \
+    --max-samples 300 \
     "${use_vllm_args[@]}" \
     --merge
 done
