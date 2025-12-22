@@ -25,8 +25,8 @@ def resolve_model_dir(model_dir: PathLike) -> str:
     return _DEFAULT_MODEL_DIR
 
 
-@lru_cache(maxsize=1)
-def get_vllm_engine(model_dir_str: str):
+@lru_cache(maxsize=4)
+def get_vllm_engine(model_dir_str: str, tensor_parallel_size: int = 1):
     """
     Lazily construct and cache a vLLM engine. Import vLLM only when the user
     actually needs it so that pure-transformers workflows do not depend on it.
@@ -40,4 +40,9 @@ def get_vllm_engine(model_dir_str: str):
         ) from exc
 
     os.environ.setdefault("VLLM_USE_FAST_TOKENIZER", "1")
-    return LLM(model=model_dir_str, dtype="bfloat16", tokenizer_mode="auto")
+    return LLM(
+        model=model_dir_str,
+        dtype="bfloat16",
+        tokenizer_mode="auto",
+        tensor_parallel_size=max(1, int(tensor_parallel_size)),
+    )

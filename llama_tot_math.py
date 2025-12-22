@@ -87,6 +87,7 @@ def _generate_batch(
     use_vllm: bool,
     stop_tokens: Optional[List[str]] = None,
     chunk_size: Optional[int] = None,
+    vllm_tp_size: int = 1,
 ) -> List[List[str]]:
     """
     根据 use_vllm 选择后端：
@@ -97,7 +98,7 @@ def _generate_batch(
         from vllm import SamplingParams  # type: ignore
 
         model_path = resolve_model_dir(model_dir)
-        engine = get_vllm_engine(model_path)
+        engine = get_vllm_engine(model_path, tensor_parallel_size=vllm_tp_size)
 
         sampling_params = SamplingParams(
             temperature=temperature,
@@ -150,6 +151,7 @@ def run_llama_tot_on_single(
     rollout_batch_size: int = 16,
     sample: Optional[Dict[str, Any]] = None,
     num_steps: Optional[int] = None,
+    vllm_tp_size: int = 1,
 ) -> Dict[str, Any]:
     """
     使用本地 LLaMA3-8B 在一条样本上运行「用于数据采集的 ToT」：
@@ -202,6 +204,7 @@ def run_llama_tot_on_single(
             n=num_step_candidates,
             use_vllm=use_vllm,
             stop_tokens=[f"\nStep {step_idx + 1}:", "\nAnswer:"],
+            vllm_tp_size=vllm_tp_size,
         )
         step_samples = step_samples_nested[0] if step_samples_nested else []
 
@@ -238,6 +241,7 @@ def run_llama_tot_on_single(
                 n=1,
                 use_vllm=use_vllm,
                 chunk_size=rollout_batch_size,
+                vllm_tp_size=vllm_tp_size,
             )
             rollout_texts = [
                 texts[0] if texts else "" for texts in rollout_outputs_nested
@@ -297,6 +301,7 @@ def run_llama_tot_on_single(
         top_p=0.95,
         n=1,
         use_vllm=use_vllm,
+        vllm_tp_size=vllm_tp_size,
     )
     final_completion = (
         final_outputs_nested[0][0] if final_outputs_nested and final_outputs_nested[0] else ""
@@ -333,6 +338,7 @@ def run_llama_tot_on_batch(
     rollout_batch_size: int = 16,
     num_steps: Optional[int] = None,
     dataset_name: str = "hendrycks_math",
+    vllm_tp_size: int = 1,
 ) -> List[Dict[str, Any]]:
     if not samples:
         return []
@@ -393,6 +399,7 @@ def run_llama_tot_on_batch(
             n=num_step_candidates,
             use_vllm=use_vllm,
             stop_tokens=[f"\nStep {step_idx + 1}:", "\nAnswer:"],
+            vllm_tp_size=vllm_tp_size,
         )
 
         candidate_prefixes_per_sample: List[List[str]] = [[] for _ in active_indices]
@@ -430,6 +437,7 @@ def run_llama_tot_on_batch(
                 n=1,
                 use_vllm=use_vllm,
                 chunk_size=rollout_batch_size,
+                vllm_tp_size=vllm_tp_size,
             )
             rollout_texts = [
                 texts[0] if texts else "" for texts in rollout_outputs_nested
@@ -487,6 +495,7 @@ def run_llama_tot_on_batch(
         top_p=0.95,
         n=1,
         use_vllm=use_vllm,
+        vllm_tp_size=vllm_tp_size,
     )
     final_completions = [
         (texts[0] if texts else "") for texts in final_outputs_nested

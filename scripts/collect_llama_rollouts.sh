@@ -18,9 +18,6 @@ for model_name in "${MODELS[@]}"; do
   model_out="${OUT_ROOT}/${model_name}"
   mkdir -p "${model_out}"
   use_vllm_args=()
-  if [[ "${model_name}" == Qwen3-* ]]; then
-    use_vllm_args=(--no-vllm)
-  fi
 
   python collect_tot.py \
     --dataset-name gsm8k \

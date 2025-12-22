@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import random
 import time
 from datetime import datetime
-from multiprocessing import get_context, Manager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -196,6 +196,7 @@ def _worker_main(
     rollout_batch_size: int,
     num_steps: Optional[int],
     sample_batch_size: int,
+    vllm_tp_size: int,
     progress_total: Optional[int],
     progress_counter,
     progress_lock,
@@ -204,8 +205,22 @@ def _worker_main(
 
     out_fp = Path(output_path)
     out_fp.parent.mkdir(parents=True, exist_ok=True)
+    local_progress = 0
+    last_print = 0.0
+
     def _bump_progress(delta: int) -> None:
+        nonlocal local_progress, last_print
         if progress_counter is None:
+            local_progress += delta
+            if progress_total and progress_total > 0:
+                now = time.time()
+                if now - last_print >= 2.0:
+                    msg = (
+                        f"[collect_tot] processed={local_progress}/{progress_total} "
+                        f"({local_progress / progress_total:.1%})"
+                    )
+                    print("\r" + msg, end="", flush=True)
+                    last_print = now
             return
         with progress_lock:
             progress_counter.value += delta
@@ -276,6 +291,7 @@ def _worker_main(
                     use_vllm=use_vllm,
                     rollout_batch_size=rollout_batch_size,
                     num_steps=num_steps,
+                    vllm_tp_size=vllm_tp_size,
                 )
                 elapsed = time.time() - t0
                 for entry_item, out in zip(batch_entries, outputs):
@@ -328,6 +344,7 @@ def _worker_main(
                 use_vllm=use_vllm,
                 rollout_batch_size=rollout_batch_size,
                 num_steps=num_steps,
+                vllm_tp_size=vllm_tp_size,
             )
             elapsed = time.time() - t0
             for out_idx, out in zip(batch_indices, outputs):
@@ -360,6 +377,7 @@ def _worker_main(
                 use_vllm=use_vllm,
                 rollout_batch_size=rollout_batch_size,
                 num_steps=num_steps,
+                vllm_tp_size=vllm_tp_size,
             )
             elapsed = time.time() - t0
             for out_idx, out in zip(batch_indices, outputs):
@@ -378,6 +396,9 @@ def _worker_main(
                 processed += 1
             f.flush()
             _bump_progress(len(batch_indices))
+
+        if progress_counter is None and progress_total:
+            print("", flush=True)
 
 
 def merge_jsonl(
@@ -510,6 +531,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="How many samples to process in parallel per GPU (default: 1).",
+    )
+    parser.add_argument(
+        "--vllm-tp-size",
+        type=int,
+        default=None,
+        help="vLLM tensor parallel size when using single-process multi-GPU (default: len(gpus)).",
     )
 
     parser.add_argument(
@@ -644,74 +671,45 @@ def main() -> None:
             return None
         return None
 
-    ctx = get_context("spawn")
-    manager = Manager()
-    progress_counter = manager.Value("i", 0)
-    progress_lock = manager.Lock()
     progress_total = len(selected) if selected is not None else _estimate_total_samples_main()
-    procs = []
-    for rank, gpu_id in enumerate(gpus):
-        out_path = output_dir / f"{output_prefix}.gpu{gpu_id}.jsonl"
-        p = ctx.Process(
-            target=_worker_main,
-            kwargs={
-                "rank": rank,
-                "world_size": len(gpus),
-                "gpu_id": gpu_id,
-                "dataset_name": args.dataset_name,
-                "dataset_path": dataset_path,
-                "split": args.split,
-                "output_path": str(out_path),
-                "selected": selected,
-                "start_index": args.start_index,
-                "end_index": args.end_index,
-                "max_samples": args.max_samples,
-                "model_dir": args.model_dir,
-                "branches": args.branches,
-                "rollouts_per_candidate": args.rollouts_per_candidate,
-                "temperature": args.temperature,
-                "use_vllm": args.use_vllm,
-                "rollout_batch_size": args.rollout_batch_size,
-                "num_steps": args.num_steps,
-                "sample_batch_size": args.sample_batch_size,
-                "progress_total": progress_total,
-                "progress_counter": progress_counter,
-                "progress_lock": progress_lock,
-            },
-        )
-        p.start()
-        procs.append(p)
-        print(f"[collect_tot] started rank={rank} gpu={gpu_id} -> {out_path}")
+    tp_size = args.vllm_tp_size or max(1, len(gpus))
+    gpu_visible = ",".join(gpus)
+    gpu_label = "-".join(gpus)
+    out_path = output_dir / f"{output_prefix}.gpu{gpu_label}.jsonl"
+    output_paths: List[Path] = [out_path]
 
-    last_print = 0.0
-    while any(p.is_alive() for p in procs):
-        now = time.time()
-        if now - last_print >= 2.0:
-            with progress_lock:
-                processed = progress_counter.value
-            if progress_total is None or progress_total <= 0:
-                msg = f"[collect_tot] processed={processed}"
-            else:
-                msg = (
-                    f"[collect_tot] processed={processed}/{progress_total} "
-                    f"({processed / progress_total:.1%})"
-                )
-            print("\r" + msg, end="", flush=True)
-            last_print = now
-        time.sleep(0.2)
-    print("", flush=True)
-
-    for p in procs:
-        p.join()
-        if p.exitcode != 0:
-            raise SystemExit(f"Worker exited with code {p.exitcode}")
+    print(f"[collect_tot] started rank=0 gpu={gpu_visible} -> {out_path}")
+    _worker_main(
+        rank=0,
+        world_size=1,
+        gpu_id=gpu_visible,
+        dataset_name=args.dataset_name,
+        dataset_path=dataset_path,
+        split=args.split,
+        output_path=str(out_path),
+        selected=selected,
+        start_index=args.start_index,
+        end_index=args.end_index,
+        max_samples=args.max_samples,
+        model_dir=args.model_dir,
+        branches=args.branches,
+        rollouts_per_candidate=args.rollouts_per_candidate,
+        temperature=args.temperature,
+        use_vllm=args.use_vllm,
+        rollout_batch_size=args.rollout_batch_size,
+        num_steps=args.num_steps,
+        sample_batch_size=args.sample_batch_size,
+        vllm_tp_size=tp_size,
+        progress_total=progress_total,
+        progress_counter=None,
+        progress_lock=contextlib.nullcontext(),
+    )
 
     merge_out = args.merge_out
     if merge_out is None and args.merge:
         merge_out = str(output_dir / f"{output_prefix}.all.jsonl")
     if merge_out:
-        inputs = [output_dir / f"{output_prefix}.gpu{gpu}.jsonl" for gpu in gpus]
-        merge_jsonl(inputs, Path(merge_out), sort_by_index=args.merge_sort)
+        merge_jsonl(output_paths, Path(merge_out), sort_by_index=args.merge_sort)
         print(f"[collect_tot] merged -> {merge_out}")
 
 
