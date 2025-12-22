@@ -3,9 +3,12 @@ set -euo pipefail
 
 MODEL_ROOT="../model"
 MODELS=(
-  "Qwen3-8B"
+  "Meta-Llama3-8B",
+  "Meta-llama3-8B-Instruct",
+  "QWen3-4B-Instruct-2507",
+    "Qwen3-8B"
 )
-GPUS="4,5,6,7"
+GPUS="3,4,5,6,7"
 OUT_ROOT="datas"
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
