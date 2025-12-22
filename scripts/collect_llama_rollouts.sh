@@ -3,11 +3,9 @@ set -euo pipefail
 
 MODEL_ROOT="../model"
 MODELS=(
-  "Meta-Llama-3-8B"
-  "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
-GPUS="0,1,2,3,4,5,6,7"
+GPUS="2,3,4,5,6,7"
 OUT_ROOT="datas"
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
@@ -34,7 +32,7 @@ for model_name in "${MODELS[@]}"; do
     --output-prefix gsm8k_tot \
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 200 \
+    --rollout-batch-size 150 \
     "${use_vllm_args[@]}" \
     --merge
 
@@ -47,7 +45,7 @@ for model_name in "${MODELS[@]}"; do
     --output-prefix svamp_tot \
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 200 \
+    --rollout-batch-size 150 \
     "${use_vllm_args[@]}" \
     --merge
 
@@ -61,7 +59,7 @@ for model_name in "${MODELS[@]}"; do
     --output-prefix math_tot \
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 200 \
+    --rollout-batch-size 150 \
     "${use_vllm_args[@]}" \
     --merge
 done
