@@ -13,7 +13,7 @@ MODELS=(
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
-GPUS="2,3,4,5"
+GPUS="6"
 VLLM_TP_SIZE=4
 OUT_ROOT="datas_math"
 export TORCH_COMPILE_DISABLE=1
