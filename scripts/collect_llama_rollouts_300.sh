@@ -6,10 +6,9 @@ MODELS=(
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
-GPUS="5,6,7,8"
+GPUS="2,5,6,7"
 VLLM_TP_SIZE=4
-OUT_ROOT="datas_300"
-export VLLM_GPU_MEMORY_UTILIZATION=0.9 
+OUT_ROOT="datas"
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
 MATH_PATH="../data/hendrycks_math"
@@ -31,7 +30,7 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/gsm8k" \
     --output-prefix gsm8k_tot \
-    --sample-batch-size 16 \
+    --sample-batch-size 32 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 200 \
     --max-samples 300 \
@@ -47,7 +46,7 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/svamp" \
     --output-prefix svamp_tot \
-    --sample-batch-size 16 \
+    --sample-batch-size 32 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 200 \
     --max-samples 300 \
