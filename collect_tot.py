@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import os
 import re
 import random
 import time
 from datetime import datetime
-from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import contextlib
 
 from dataset_utils import default_dataset_path, iter_samples, normalize_sample
 from llama_tot_math import run_llama_tot_on_batch, run_llama_tot_on_single
@@ -788,80 +787,37 @@ def main() -> None:
             print(f"[collect_tot] merged -> {merge_out}")
         return
 
-    if len(gpus) > 1:
-        ctx = get_context("spawn")
-        procs = []
-        for rank, gpu_id in enumerate(gpus):
-            out_path = output_dir / f"{output_prefix}.gpu{gpu_id}.jsonl"
-            output_paths.append(out_path)
-            p = ctx.Process(
-                target=_worker_main,
-                kwargs={
-                    "rank": rank,
-                    "world_size": len(gpus),
-                    "gpu_id": gpu_id,
-                    "dataset_name": args.dataset_name,
-                    "dataset_path": dataset_path,
-                    "split": args.split,
-                    "output_path": str(out_path),
-                    "selected": selected,
-                    "start_index": args.start_index,
-                    "end_index": args.end_index,
-                    "max_samples": args.max_samples,
-                    "model_dir": args.model_dir,
-                    "branches": args.branches,
-                    "rollouts_per_candidate": args.rollouts_per_candidate,
-                    "temperature": args.temperature,
-                    "use_vllm": args.use_vllm,
-                    "rollout_batch_size": args.rollout_batch_size,
-                    "num_steps": args.num_steps,
-                    "sample_batch_size": args.sample_batch_size,
-                    "log_per_sample": args.log_per_sample,
-                    "progress_total": progress_total,
-                    "progress_counter": None,
-                    "progress_lock": contextlib.nullcontext(),
-                },
-            )
-            p.start()
-            procs.append(p)
-            print(f"[collect_tot] started rank={rank} gpu={gpu_id} -> {out_path}")
+    gpu_visible = ",".join(gpus)
+    gpu_label = "-".join(gpus)
+    out_path = output_dir / f"{output_prefix}.gpu{gpu_label}.jsonl"
+    output_paths.append(out_path)
 
-        for p in procs:
-            p.join()
-            if p.exitcode != 0:
-                raise SystemExit(f"Worker exited with code {p.exitcode}")
-    else:
-        gpu_visible = ",".join(gpus)
-        gpu_label = "-".join(gpus)
-        out_path = output_dir / f"{output_prefix}.gpu{gpu_label}.jsonl"
-        output_paths.append(out_path)
-
-        print(f"[collect_tot] started rank=0 gpu={gpu_visible} -> {out_path}")
-        _worker_main(
-            rank=0,
-            world_size=1,
-            gpu_id=gpu_visible,
-            dataset_name=args.dataset_name,
-            dataset_path=dataset_path,
-            split=args.split,
-            output_path=str(out_path),
-            selected=selected,
-            start_index=args.start_index,
-            end_index=args.end_index,
-            max_samples=args.max_samples,
-            model_dir=args.model_dir,
-            branches=args.branches,
-            rollouts_per_candidate=args.rollouts_per_candidate,
-            temperature=args.temperature,
-            use_vllm=args.use_vllm,
-            rollout_batch_size=args.rollout_batch_size,
-            num_steps=args.num_steps,
-            sample_batch_size=args.sample_batch_size,
-            log_per_sample=args.log_per_sample,
-            progress_total=progress_total,
-            progress_counter=None,
-            progress_lock=contextlib.nullcontext(),
-        )
+    print(f"[collect_tot] started rank=0 gpu={gpu_visible} -> {out_path}")
+    _worker_main(
+        rank=0,
+        world_size=1,
+        gpu_id=gpu_visible,
+        dataset_name=args.dataset_name,
+        dataset_path=dataset_path,
+        split=args.split,
+        output_path=str(out_path),
+        selected=selected,
+        start_index=args.start_index,
+        end_index=args.end_index,
+        max_samples=args.max_samples,
+        model_dir=args.model_dir,
+        branches=args.branches,
+        rollouts_per_candidate=args.rollouts_per_candidate,
+        temperature=args.temperature,
+        use_vllm=args.use_vllm,
+        rollout_batch_size=args.rollout_batch_size,
+        num_steps=args.num_steps,
+        sample_batch_size=args.sample_batch_size,
+        log_per_sample=args.log_per_sample,
+        progress_total=progress_total,
+        progress_counter=None,
+        progress_lock=contextlib.nullcontext(),
+    )
 
     merge_out = args.merge_out
     if merge_out is None and args.merge:

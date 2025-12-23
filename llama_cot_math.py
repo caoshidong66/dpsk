@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Union
 
 from cot_math import build_completion_prompt
 from dataset_utils import default_dataset_path, load_one_sample
-from llama_api import llama_completion
 from local_llama_backend import get_vllm_engine, resolve_model_dir
 from tool import extract_model_answer, is_model_correct, steps_for_dataset, steps_for_level
 
@@ -111,6 +110,7 @@ def run_llama_cot_on_single(
             max_new_tokens=max_new_tokens,
         )
     else:
+        from llama_api import llama_completion
         completion = llama_completion(
             prompt=prompt,
             model_dir=model_dir,
@@ -176,6 +176,7 @@ def run_llama_cot_on_batch(
             max_new_tokens=max_new_tokens,
         )
     else:
+        from llama_api import llama_completion
         completions = [
             llama_completion(
                 prompt=prompt,
