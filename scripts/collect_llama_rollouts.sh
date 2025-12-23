@@ -5,8 +5,6 @@ MODEL_ROOT="../model"
 MODELS=(
   "Meta-Llama-3-8B"
   "Meta-Llama-3-8B-Instruct"
-  "Qwen3-4B-Instruct-2507"
-  "Qwen3-8B"
 )
 GPUS="4,5,6,7"
 VLLM_TP_SIZE=4
@@ -32,9 +30,9 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/gsm8k" \
     --output-prefix gsm8k_tot \
-    --sample-batch-size 16 \
+    --sample-batch-size 32 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 150 \
+    --rollout-batch-size 200 \
     --max-samples 300 \
     --log-per-sample \
     "${use_vllm_args[@]}" \
@@ -48,9 +46,9 @@ for model_name in "${MODELS[@]}"; do
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/svamp" \
     --output-prefix svamp_tot \
-    --sample-batch-size 16 \
+    --sample-batch-size 32 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 150 \
+    --rollout-batch-size 200 \
     --max-samples 300 \
     --log-per-sample \
     "${use_vllm_args[@]}" \
@@ -67,7 +65,7 @@ for model_name in "${MODELS[@]}"; do
     --output-prefix math_tot \
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
-    --rollout-batch-size 150 \
+    --rollout-batch-size 200 \
     --max-samples 300 \
     --log-per-sample \
     "${use_vllm_args[@]}" \
