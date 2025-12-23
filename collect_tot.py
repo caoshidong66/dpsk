@@ -197,6 +197,7 @@ def _worker_main(
     num_steps: Optional[int],
     sample_batch_size: int,
     vllm_tp_size: int,
+    log_per_sample: bool,
     progress_total: Optional[int],
     progress_counter,
     progress_lock,
@@ -309,6 +310,8 @@ def _worker_main(
                     }
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     processed += 1
+                    if log_per_sample:
+                        print(f"[collect_tot] done index={idx} elapsed={elapsed:.2f}s", flush=True)
                 f.flush()
                 _bump_progress(len(batch_entries))
                 batch_entries = []
@@ -361,6 +364,8 @@ def _worker_main(
                 }
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 processed += 1
+                if log_per_sample:
+                    print(f"[collect_tot] done index={out_idx} elapsed={elapsed:.2f}s", flush=True)
             f.flush()
             _bump_progress(len(batch_indices))
             batch_samples = []
@@ -394,6 +399,8 @@ def _worker_main(
                 }
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 processed += 1
+                if log_per_sample:
+                    print(f"[collect_tot] done index={out_idx} elapsed={elapsed:.2f}s", flush=True)
             f.flush()
             _bump_progress(len(batch_indices))
 
@@ -537,6 +544,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="vLLM tensor parallel size when using single-process multi-GPU (default: len(gpus)).",
+    )
+    parser.add_argument(
+        "--log-per-sample",
+        action="store_true",
+        help="Print per-sample completion logs (verbose).",
     )
 
     parser.add_argument(
@@ -700,6 +712,7 @@ def main() -> None:
         num_steps=args.num_steps,
         sample_batch_size=args.sample_batch_size,
         vllm_tp_size=tp_size,
+        log_per_sample=args.log_per_sample,
         progress_total=progress_total,
         progress_counter=None,
         progress_lock=contextlib.nullcontext(),
