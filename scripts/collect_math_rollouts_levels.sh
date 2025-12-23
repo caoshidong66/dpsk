@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+
+export TORCHINDUCTOR_CACHE_DIR=/local/$USER/torchinductor_$RANDOM
+export VLLM_CACHE_DIR=/local/$USER/vllm_$RANDOM
+export HF_HOME=/local/$USER/hf_$RANDOM
+
 set -euo pipefail
 
 MODEL_ROOT="../model"
