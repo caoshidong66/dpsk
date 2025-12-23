@@ -6,9 +6,8 @@ modules can reuse the same cached engine without re-loading the model.
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 
 
 PathLike = Optional[Union[str, Path]]
@@ -25,7 +24,9 @@ def resolve_model_dir(model_dir: PathLike) -> str:
     return _DEFAULT_MODEL_DIR
 
 
-@lru_cache(maxsize=4)
+_VLLM_ENGINES: Dict[tuple[str, int], Any] = {}
+
+
 def get_vllm_engine(model_dir_str: str, tensor_parallel_size: int = 1):
     """
     Lazily construct and cache a vLLM engine. Import vLLM only when the user
@@ -40,9 +41,23 @@ def get_vllm_engine(model_dir_str: str, tensor_parallel_size: int = 1):
         ) from exc
 
     os.environ.setdefault("VLLM_USE_FAST_TOKENIZER", "1")
-    return LLM(
+    key = (model_dir_str, max(1, int(tensor_parallel_size)))
+    engine = _VLLM_ENGINES.get(key)
+    if engine is not None:
+        return engine
+    engine = LLM(
         model=model_dir_str,
         dtype="bfloat16",
         tokenizer_mode="auto",
-        tensor_parallel_size=max(1, int(tensor_parallel_size)),
+        tensor_parallel_size=key[1],
     )
+    _VLLM_ENGINES[key] = engine
+    return engine
+
+
+def shutdown_vllm_engines() -> None:
+    for engine in list(_VLLM_ENGINES.values()):
+        shutdown = getattr(engine, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+    _VLLM_ENGINES.clear()

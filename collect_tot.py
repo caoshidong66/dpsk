@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from dataset_utils import default_dataset_path, iter_samples, normalize_sample
 from llama_tot_math import run_llama_tot_on_batch, run_llama_tot_on_single
+from local_llama_backend import shutdown_vllm_engines
 
 
 def _parse_gpus(value: str) -> List[str]:
@@ -272,20 +273,79 @@ def _worker_main(
             return None
         return None
 
-    with out_fp.open("a", encoding="utf-8") as f:
-        processed = 0
-        if selected is not None:
-            batch_entries: List[Dict[str, Any]] = []
-            for pos, entry in enumerate(selected):
-                if pos % world_size != rank:
+    try:
+        with out_fp.open("a", encoding="utf-8") as f:
+            processed = 0
+            if selected is not None:
+                batch_entries: List[Dict[str, Any]] = []
+                for pos, entry in enumerate(selected):
+                    if pos % world_size != rank:
+                        continue
+                    batch_entries.append(entry)
+                    if len(batch_entries) < sample_batch_size:
+                        continue
+
+                    t0 = time.time()
+                    outputs = run_llama_tot_on_batch(
+                        samples=[e["sample"] for e in batch_entries],
+                        model_dir=model_dir,
+                        num_step_candidates=branches,
+                        rollouts_per_candidate=rollouts_per_candidate,
+                        temperature=temperature,
+                        use_vllm=use_vllm,
+                        rollout_batch_size=rollout_batch_size,
+                        num_steps=num_steps,
+                        vllm_tp_size=vllm_tp_size,
+                    )
+                    elapsed = time.time() - t0
+                    for entry_item, out in zip(batch_entries, outputs):
+                        idx = int(entry_item["index"])
+                        record = {
+                            "dataset_name": dataset_name,
+                            "dataset_path": str(dataset_path),
+                            "split": split,
+                            "index": idx,
+                            "gpu": str(gpu_id),
+                            "rank": rank,
+                            "world_size": world_size,
+                            "elapsed_sec": elapsed,
+                            "tot": out,
+                        }
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        processed += 1
+                        if log_per_sample:
+                            print(
+                                f"[collect_tot] done index={idx} elapsed={elapsed:.2f}s",
+                                flush=True,
+                            )
+                    f.flush()
+                    _bump_progress(len(batch_entries))
+                    batch_entries = []
+                return
+
+            total_all = _estimate_total_samples()
+
+            batch_samples: List[Dict[str, Any]] = []
+            batch_indices: List[int] = []
+            for idx, raw in enumerate(iter_samples(dataset_name, dataset_path, split=split)):
+                if idx < start_index:
                     continue
-                batch_entries.append(entry)
-                if len(batch_entries) < sample_batch_size:
+                if end_index is not None and idx >= end_index:
+                    break
+                if max_samples is not None and idx >= start_index + max_samples:
+                    break
+                if (idx - start_index) % world_size != rank:
+                    continue
+
+                sample = normalize_sample(dataset_name, raw)
+                batch_samples.append(sample)
+                batch_indices.append(idx)
+                if len(batch_samples) < sample_batch_size:
                     continue
 
                 t0 = time.time()
                 outputs = run_llama_tot_on_batch(
-                    samples=[e["sample"] for e in batch_entries],
+                    samples=batch_samples,
                     model_dir=model_dir,
                     num_step_candidates=branches,
                     rollouts_per_candidate=rollouts_per_candidate,
@@ -296,13 +356,12 @@ def _worker_main(
                     vllm_tp_size=vllm_tp_size,
                 )
                 elapsed = time.time() - t0
-                for entry_item, out in zip(batch_entries, outputs):
-                    idx = int(entry_item["index"])
-                    record = {
+                for out_idx, out in zip(batch_indices, outputs):
+                    record: Dict[str, Any] = {
                         "dataset_name": dataset_name,
                         "dataset_path": str(dataset_path),
                         "split": split,
-                        "index": idx,
+                        "index": out_idx,
                         "gpu": str(gpu_id),
                         "rank": rank,
                         "world_size": world_size,
@@ -312,101 +371,55 @@ def _worker_main(
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     processed += 1
                     if log_per_sample:
-                        print(f"[collect_tot] done index={idx} elapsed={elapsed:.2f}s", flush=True)
+                        print(
+                            f"[collect_tot] done index={out_idx} elapsed={elapsed:.2f}s",
+                            flush=True,
+                        )
                 f.flush()
-                _bump_progress(len(batch_entries))
-                batch_entries = []
-            return
+                _bump_progress(len(batch_indices))
+                batch_samples = []
+                batch_indices = []
 
-        total_all = _estimate_total_samples()
+            if batch_samples:
+                t0 = time.time()
+                outputs = run_llama_tot_on_batch(
+                    samples=batch_samples,
+                    model_dir=model_dir,
+                    num_step_candidates=branches,
+                    rollouts_per_candidate=rollouts_per_candidate,
+                    temperature=temperature,
+                    use_vllm=use_vllm,
+                    rollout_batch_size=rollout_batch_size,
+                    num_steps=num_steps,
+                    vllm_tp_size=vllm_tp_size,
+                )
+                elapsed = time.time() - t0
+                for out_idx, out in zip(batch_indices, outputs):
+                    record = {
+                        "dataset_name": dataset_name,
+                        "dataset_path": str(dataset_path),
+                        "split": split,
+                        "index": out_idx,
+                        "gpu": str(gpu_id),
+                        "rank": rank,
+                        "world_size": world_size,
+                        "elapsed_sec": elapsed,
+                        "tot": out,
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    processed += 1
+                    if log_per_sample:
+                        print(
+                            f"[collect_tot] done index={out_idx} elapsed={elapsed:.2f}s",
+                            flush=True,
+                        )
+                f.flush()
+                _bump_progress(len(batch_indices))
 
-        batch_samples: List[Dict[str, Any]] = []
-        batch_indices: List[int] = []
-        for idx, raw in enumerate(iter_samples(dataset_name, dataset_path, split=split)):
-            if idx < start_index:
-                continue
-            if end_index is not None and idx >= end_index:
-                break
-            if max_samples is not None and idx >= start_index + max_samples:
-                break
-            if (idx - start_index) % world_size != rank:
-                continue
-
-            sample = normalize_sample(dataset_name, raw)
-            batch_samples.append(sample)
-            batch_indices.append(idx)
-            if len(batch_samples) < sample_batch_size:
-                continue
-
-            t0 = time.time()
-            outputs = run_llama_tot_on_batch(
-                samples=batch_samples,
-                model_dir=model_dir,
-                num_step_candidates=branches,
-                rollouts_per_candidate=rollouts_per_candidate,
-                temperature=temperature,
-                use_vllm=use_vllm,
-                rollout_batch_size=rollout_batch_size,
-                num_steps=num_steps,
-                vllm_tp_size=vllm_tp_size,
-            )
-            elapsed = time.time() - t0
-            for out_idx, out in zip(batch_indices, outputs):
-                record: Dict[str, Any] = {
-                    "dataset_name": dataset_name,
-                    "dataset_path": str(dataset_path),
-                    "split": split,
-                    "index": out_idx,
-                    "gpu": str(gpu_id),
-                    "rank": rank,
-                    "world_size": world_size,
-                    "elapsed_sec": elapsed,
-                    "tot": out,
-                }
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                processed += 1
-                if log_per_sample:
-                    print(f"[collect_tot] done index={out_idx} elapsed={elapsed:.2f}s", flush=True)
-            f.flush()
-            _bump_progress(len(batch_indices))
-            batch_samples = []
-            batch_indices = []
-
-        if batch_samples:
-            t0 = time.time()
-            outputs = run_llama_tot_on_batch(
-                samples=batch_samples,
-                model_dir=model_dir,
-                num_step_candidates=branches,
-                rollouts_per_candidate=rollouts_per_candidate,
-                temperature=temperature,
-                use_vllm=use_vllm,
-                rollout_batch_size=rollout_batch_size,
-                num_steps=num_steps,
-                vllm_tp_size=vllm_tp_size,
-            )
-            elapsed = time.time() - t0
-            for out_idx, out in zip(batch_indices, outputs):
-                record = {
-                    "dataset_name": dataset_name,
-                    "dataset_path": str(dataset_path),
-                    "split": split,
-                    "index": out_idx,
-                    "gpu": str(gpu_id),
-                    "rank": rank,
-                    "world_size": world_size,
-                    "elapsed_sec": elapsed,
-                    "tot": out,
-                }
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                processed += 1
-                if log_per_sample:
-                    print(f"[collect_tot] done index={out_idx} elapsed={elapsed:.2f}s", flush=True)
-            f.flush()
-            _bump_progress(len(batch_indices))
-
-        if progress_counter is None and progress_total:
-            print("", flush=True)
+            if progress_counter is None and progress_total:
+                print("", flush=True)
+    finally:
+        shutdown_vllm_engines()
 
 
 def merge_jsonl(
