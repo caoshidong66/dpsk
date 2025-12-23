@@ -9,6 +9,10 @@ MODELS=(
 GPUS="2,5,6,7"
 VLLM_TP_SIZE=4
 OUT_ROOT="datas"
+export TORCH_COMPILE_DISABLE=1
+export VLLM_GPU_MEMORY_UTILIZATION=0.7
+export VLLM_DISABLE_PROGRESS_BAR=1
+export VLLM_LOGGING_LEVEL=ERROR
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
 MATH_PATH="../data/hendrycks_math"
@@ -35,8 +39,7 @@ for model_name in "${MODELS[@]}"; do
     --rollout-batch-size 200 \
     --max-samples 300 \
     --log-per-sample \
-    "${use_vllm_args[@]}" \
-    --merge
+    "${use_vllm_args[@]}"
 
   python collect_tot.py \
     --dataset-name svamp \
@@ -51,8 +54,7 @@ for model_name in "${MODELS[@]}"; do
     --rollout-batch-size 200 \
     --max-samples 300 \
     --log-per-sample \
-    "${use_vllm_args[@]}" \
-    --merge
+    "${use_vllm_args[@]}"
 
   python collect_tot.py \
     --dataset-name hendrycks_math \
@@ -68,6 +70,5 @@ for model_name in "${MODELS[@]}"; do
     --rollout-batch-size 200 \
     --max-samples 300 \
     --log-per-sample \
-    "${use_vllm_args[@]}" \
-    --merge
+    "${use_vllm_args[@]}"
 done
