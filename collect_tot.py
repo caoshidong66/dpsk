@@ -15,6 +15,20 @@ from typing import Any, Dict, List, Optional
 from dataset_utils import default_dataset_path, iter_samples, normalize_sample
 from llama_tot_math import run_llama_tot_on_batch, run_llama_tot_on_single
 from local_llama_backend import shutdown_vllm_engines
+# collect_tot.py 顶部，第一屏就要写
+import os
+
+HOME = os.path.expanduser("~")
+
+os.environ["TMPDIR"] = f"{HOME}/.tmp"
+os.environ["TEMP"] = f"{HOME}/.tmp"
+os.environ["TMP"] = f"{HOME}/.tmp"
+
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = f"{HOME}/.cache/torch/inductor"
+os.environ["TORCH_COMPILE_DEBUG_DIR"] = f"{HOME}/.cache/torch/compile"
+os.environ["TRITON_CACHE_DIR"] = f"{HOME}/.cache/triton"
+os.environ["CUDA_CACHE_PATH"] = f"{HOME}/.cache/cuda"
+os.environ["XDG_CACHE_HOME"] = f"{HOME}/.cache"
 
 
 def _parse_gpus(value: str) -> List[str]:
