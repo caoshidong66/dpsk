@@ -14,7 +14,6 @@ MODELS=(
   "Qwen3-8B"
 )
 GPUS="6"
-VLLM_TP_SIZE=4
 OUT_ROOT="datas_math"
 export TORCH_COMPILE_DISABLE=1
 export VLLM_GPU_MEMORY_UTILIZATION=0.7
@@ -36,7 +35,6 @@ for model_name in "${MODELS[@]}"; do
       --split train \
       --level "${level}" \
       --gpus "${GPUS}" \
-      --vllm-tp-size "${VLLM_TP_SIZE}" \
       --model-dir "${model_dir}" \
       --output-dir "${model_out}/math_l${level}" \
       --output-prefix math_l${level}_tot \

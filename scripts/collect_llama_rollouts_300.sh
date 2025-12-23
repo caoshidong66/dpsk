@@ -7,7 +7,6 @@ MODELS=(
   "Qwen3-8B"
 )
 GPUS="2,5,6,7"
-VLLM_TP_SIZE=4
 OUT_ROOT="datas"
 export TORCH_COMPILE_DISABLE=1
 export VLLM_GPU_MEMORY_UTILIZATION=0.7
@@ -30,7 +29,6 @@ for model_name in "${MODELS[@]}"; do
     --dataset-path "${GSM8K_PATH}" \
     --split train \
     --gpus "${GPUS}" \
-    --vllm-tp-size "${VLLM_TP_SIZE}" \
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/gsm8k" \
     --output-prefix gsm8k_tot \
@@ -45,7 +43,6 @@ for model_name in "${MODELS[@]}"; do
     --dataset-name svamp \
     --dataset-path "${SVAMP_PATH}" \
     --gpus "${GPUS}" \
-    --vllm-tp-size "${VLLM_TP_SIZE}" \
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/svamp" \
     --output-prefix svamp_tot \
@@ -61,7 +58,6 @@ for model_name in "${MODELS[@]}"; do
     --dataset-path "${MATH_PATH}" \
     --split train \
     --gpus "${GPUS}" \
-    --vllm-tp-size "${VLLM_TP_SIZE}" \
     --model-dir "${model_dir}" \
     --output-dir "${model_out}/math" \
     --output-prefix math_tot \

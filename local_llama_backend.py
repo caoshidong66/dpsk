@@ -24,10 +24,10 @@ def resolve_model_dir(model_dir: PathLike) -> str:
     return _DEFAULT_MODEL_DIR
 
 
-_VLLM_ENGINES: Dict[tuple[str, int], Any] = {}
+_VLLM_ENGINES: Dict[str, Any] = {}
 
 
-def get_vllm_engine(model_dir_str: str, tensor_parallel_size: int = 1):
+def get_vllm_engine(model_dir_str: str):
     """
     Lazily construct and cache a vLLM engine. Import vLLM only when the user
     actually needs it so that pure-transformers workflows do not depend on it.
@@ -41,7 +41,7 @@ def get_vllm_engine(model_dir_str: str, tensor_parallel_size: int = 1):
         ) from exc
 
     os.environ.setdefault("VLLM_USE_FAST_TOKENIZER", "1")
-    key = (model_dir_str, max(1, int(tensor_parallel_size)))
+    key = model_dir_str
     engine = _VLLM_ENGINES.get(key)
     if engine is not None:
         return engine
@@ -49,7 +49,6 @@ def get_vllm_engine(model_dir_str: str, tensor_parallel_size: int = 1):
         model=model_dir_str,
         dtype="bfloat16",
         tokenizer_mode="auto",
-        tensor_parallel_size=key[1],
     )
     _VLLM_ENGINES[key] = engine
     return engine
