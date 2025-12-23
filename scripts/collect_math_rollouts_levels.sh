@@ -3,10 +3,10 @@ set -euo pipefail
 
 MODEL_ROOT="../model"
 MODELS=(
-  "Qwen3-4B-Instruct-2507"
-  "Qwen3-8B"
+  "Meta-Llama-3-8B"
+  "Meta-Llama-3-8B-Instruct"
 )
-GPUS="2,5,6,7"
+GPUS="2,3,4,5"
 VLLM_TP_SIZE=4
 OUT_ROOT="datas"
 export TORCH_COMPILE_DISABLE=1
