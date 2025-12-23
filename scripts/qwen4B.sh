@@ -23,13 +23,17 @@ MATH_PATH="../data/hendrycks_math"
 
 mkdir -p "${OUT_ROOT}"
 
+IFS=',' read -ra GPU_ARR <<< "${GPUS}"
+NPROC="${#GPU_ARR[@]}"
+
 for model_name in "${MODELS[@]}"; do
   model_dir="${MODEL_ROOT}/${model_name}"
   model_out="${OUT_ROOT}/${model_name}"
   mkdir -p "${model_out}"
 
   for level in 1 2 3 4 5; do
-    python collect_tot.py \
+    CUDA_VISIBLE_DEVICES="${GPUS}" \
+    torchrun --nproc_per_node "${NPROC}" collect_tot.py \
       --dataset-name hendrycks_math \
       --dataset-path "${MATH_PATH}" \
       --split train \
