@@ -10,10 +10,12 @@ MODEL_ROOT="../model"
 MODELS=(
   "Meta-Llama-3-8B"
   "Meta-Llama-3-8B-Instruct"
+  "Qwen3-4B-Instruct-2507"
+  "Qwen3-8B"
 )
 GPUS="2,3,4,5"
 VLLM_TP_SIZE=4
-OUT_ROOT="datas"
+OUT_ROOT="datas_math"
 export TORCH_COMPILE_DISABLE=1
 export VLLM_GPU_MEMORY_UTILIZATION=0.7
 export VLLM_DISABLE_PROGRESS_BAR=1
