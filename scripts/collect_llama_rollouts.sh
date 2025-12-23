@@ -35,6 +35,8 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 150 \
+    --max-samples 300 \
+    --log-per-sample \
     "${use_vllm_args[@]}" \
     --merge
 
@@ -49,6 +51,8 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 150 \
+    --max-samples 300 \
+    --log-per-sample \
     "${use_vllm_args[@]}" \
     --merge
 
@@ -64,6 +68,8 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 150 \
+    --max-samples 300 \
+    --log-per-sample \
     "${use_vllm_args[@]}" \
     --merge
 done
