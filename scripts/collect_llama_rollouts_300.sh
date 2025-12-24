@@ -3,18 +3,19 @@ set -euo pipefail
 
 MODEL_ROOT="../model"
 MODELS=(
+  "Meta-Llama-3-8B"
+  "Meta-Llama-3-8B-Instruct"
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
 GPUS="2,5,6,7"
 OUT_ROOT="datas"
 export TORCH_COMPILE_DISABLE=1
-export VLLM_GPU_MEMORY_UTILIZATION=0.7
+export VLLM_GPU_MEMORY_UTILIZATION=0.9
 export VLLM_DISABLE_PROGRESS_BAR=1
 export VLLM_LOGGING_LEVEL=ERROR
 GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
-MATH_PATH="../data/hendrycks_math"
 
 mkdir -p "${OUT_ROOT}"
 
@@ -53,18 +54,4 @@ for model_name in "${MODELS[@]}"; do
     --log-per-sample \
     "${use_vllm_args[@]}"
 
-  python collect_tot.py \
-    --dataset-name hendrycks_math \
-    --dataset-path "${MATH_PATH}" \
-    --split train \
-    --gpus "${GPUS}" \
-    --model-dir "${model_dir}" \
-    --output-dir "${model_out}/math" \
-    --output-prefix math_tot \
-    --sample-batch-size 16 \
-    --rollouts-per-candidate 8 \
-    --rollout-batch-size 200 \
-    --max-samples 300 \
-    --log-per-sample \
-    "${use_vllm_args[@]}"
 done
