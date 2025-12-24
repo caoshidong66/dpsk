@@ -8,10 +8,11 @@ set -euo pipefail
 
 MODEL_ROOT="../model" 
 MODELS=(
-  "Qwen3-8B"
+  "Meta-Llama-3-8B"
+  "Meta-Llama-3-8B-Instruct"
 )
-GPUS="5,6,7"
-OUT_ROOT="datas_math_final"
+GPUS="0,1,2,3,4,5,6,7"
+OUT_ROOT="datas_math_all"
 export TORCH_COMPILE_DISABLE=1
 export VLLM_GPU_MEMORY_UTILIZATION=0.9                            
 export VLLM_DISABLE_PROGRESS_BAR=1
@@ -37,8 +38,7 @@ for model_name in "${MODELS[@]}"; do
       --output-prefix math_l${level}_tot \
       --sample-batch-size 16 \
       --rollouts-per-candidate 8 \
-      --rollout-batch-size 200 \
-      --max-samples 300 \
+      --rollout-batch-size 250 \
       --log-per-sample
   done
 done
