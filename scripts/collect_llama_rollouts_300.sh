@@ -8,7 +8,7 @@ MODELS=(
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
-GPUS="2,5,6,7"
+GPUS="0,1,2,3,4,5,6,7"
 OUT_ROOT="datas"
 export TORCH_COMPILE_DISABLE=1
 export VLLM_GPU_MEMORY_UTILIZATION=0.9
