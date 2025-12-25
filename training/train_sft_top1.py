@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -30,6 +31,26 @@ from transformers import (
 
 from lora_utils import add_lora_args, apply_lora_from_args
 
+LOCAL_BASE = os.environ.get(
+    "LOCAL_SCRATCH", os.path.join(os.path.expanduser("~"), "local")
+)
+os.environ["TMPDIR"] = f"{LOCAL_BASE}/tmp"
+os.environ["TEMP"] = f"{LOCAL_BASE}/tmp"
+os.environ["TMP"] = f"{LOCAL_BASE}/tmp"
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = f"{LOCAL_BASE}/torchinductor"
+os.environ["TORCH_COMPILE_DEBUG_DIR"] = f"{LOCAL_BASE}/torchcompile"
+os.environ["TRITON_CACHE_DIR"] = f"{LOCAL_BASE}/triton"
+os.environ["CUDA_CACHE_PATH"] = f"{LOCAL_BASE}/cuda"
+os.environ["XDG_CACHE_HOME"] = f"{LOCAL_BASE}/xdg_cache"
+for cache_dir in [
+    os.environ["TMPDIR"],
+    os.environ["TORCHINDUCTOR_CACHE_DIR"],
+    os.environ["TORCH_COMPILE_DEBUG_DIR"],
+    os.environ["TRITON_CACHE_DIR"],
+    os.environ["CUDA_CACHE_PATH"],
+    os.environ["XDG_CACHE_HOME"],
+]:
+    os.makedirs(cache_dir, exist_ok=True)
 
 def load_tot_jsonl(jsonl_path: Path) -> List[Dict[str, object]]:
     records: List[Dict[str, object]] = []
@@ -154,6 +175,11 @@ def main() -> None:
         help="Gradient accumulation steps.",
     )
     parser.add_argument(
+        "--save-per-epoch",
+        action="store_true",
+        help="Save checkpoints at the end of each epoch.",
+    )
+    parser.add_argument(
         "--learning-rate",
         type=float,
         default=5e-6,
@@ -208,14 +234,20 @@ def main() -> None:
     elif args.fp16:
         dtype = torch.float16
 
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+    using_ddp = local_rank >= 0
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         torch_dtype=dtype,
-        device_map="auto",
+        device_map=("auto" if not using_ddp else None),
     )
     model.config.use_cache = False
     model = apply_lora_from_args(model, args)
+    if using_ddp and model.device.type != "cuda":
+        model.to(torch.device(f"cuda:{local_rank}"))
 
+    save_strategy = "epoch" if args.save_per_epoch else "no"
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -223,7 +255,8 @@ def main() -> None:
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
         logging_steps=10,
-        save_steps=500,
+        save_strategy=save_strategy,
+        evaluation_strategy="no",
         save_total_limit=2,
         bf16=args.bf16,
         fp16=args.fp16,
@@ -239,7 +272,6 @@ def main() -> None:
     )
     trainer.train()
     trainer.save_model(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
 
 
 if __name__ == "__main__":

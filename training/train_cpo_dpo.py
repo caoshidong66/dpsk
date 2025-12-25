@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Dict, Optional, Union
 
@@ -45,6 +46,26 @@ from trl import CPOTrainer  # type: ignore
 
 from lora_utils import add_lora_args, apply_lora_from_args, freeze_model
 
+LOCAL_BASE = os.environ.get(
+    "LOCAL_SCRATCH", os.path.join(os.path.expanduser("~"), "local")
+)
+os.environ["TMPDIR"] = f"{LOCAL_BASE}/tmp"
+os.environ["TEMP"] = f"{LOCAL_BASE}/tmp"
+os.environ["TMP"] = f"{LOCAL_BASE}/tmp"
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = f"{LOCAL_BASE}/torchinductor"
+os.environ["TORCH_COMPILE_DEBUG_DIR"] = f"{LOCAL_BASE}/torchcompile"
+os.environ["TRITON_CACHE_DIR"] = f"{LOCAL_BASE}/triton"
+os.environ["CUDA_CACHE_PATH"] = f"{LOCAL_BASE}/cuda"
+os.environ["XDG_CACHE_HOME"] = f"{LOCAL_BASE}/xdg_cache"
+for cache_dir in [
+    os.environ["TMPDIR"],
+    os.environ["TORCHINDUCTOR_CACHE_DIR"],
+    os.environ["TORCH_COMPILE_DEBUG_DIR"],
+    os.environ["TRITON_CACHE_DIR"],
+    os.environ["CUDA_CACHE_PATH"],
+    os.environ["XDG_CACHE_HOME"],
+]:
+    os.makedirs(cache_dir, exist_ok=True)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -144,10 +165,9 @@ def parse_args() -> argparse.Namespace:
         help="Interval (in steps) for logging (default: 10).",
     )
     parser.add_argument(
-        "--save-steps",
-        type=int,
-        default=500,
-        help="Interval (in steps) for checkpointing (default: 500).",
+        "--save-per-epoch",
+        action="store_true",
+        help="Save checkpoints at the end of each epoch.",
     )
     parser.add_argument(
         "--beta",
@@ -236,6 +256,9 @@ def load_pairwise_dataset(
 def main() -> None:
     args = parse_args()
 
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+    using_ddp = local_rank >= 0
+
     dataset = load_pairwise_dataset(
         dataset_path=args.dataset,
         prompt_col=args.prompt_column,
@@ -263,7 +286,7 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         torch_dtype=torch_dtype,
-        device_map="auto",
+        device_map=("auto" if not using_ddp else None),
     )
     model.config.use_cache = False
     model = apply_lora_from_args(model, args)
@@ -272,7 +295,7 @@ def main() -> None:
         ref_model = AutoModelForCausalLM.from_pretrained(
             args.ref_model_name_or_path,
             torch_dtype=torch_dtype,
-            device_map="auto",
+            device_map=("auto" if not using_ddp else None),
         )
         freeze_model(ref_model)
     else:
@@ -280,11 +303,18 @@ def main() -> None:
             ref_model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
                 torch_dtype=torch_dtype,
-                device_map="auto",
+                device_map=("auto" if not using_ddp else None),
             )
             freeze_model(ref_model)
         else:
             ref_model = None
+
+    if using_ddp and model.device.type != "cuda":
+        model.to(torch.device(f"cuda:{local_rank}"))
+    if using_ddp and ref_model is not None and ref_model.device.type != "cuda":
+        ref_model.to(torch.device(f"cuda:{local_rank}"))
+
+    save_strategy = "epoch" if args.save_per_epoch else "no"
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -295,9 +325,8 @@ def main() -> None:
         learning_rate=args.learning_rate,
         warmup_steps=args.warmup_steps,
         logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        evaluation_strategy="steps",
-        eval_steps=max(args.save_steps, args.logging_steps),
+        save_strategy=save_strategy,
+        evaluation_strategy="no",
         save_total_limit=2,
         bf16=args.bf16,
         fp16=args.fp16,
@@ -314,7 +343,7 @@ def main() -> None:
         label_smoothing=args.label_smoothing,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        eval_dataset=None,
         tokenizer=tokenizer,
         max_length=args.max_seq_length,
         max_prompt_length=args.max_prompt_length,
@@ -322,11 +351,8 @@ def main() -> None:
     )
 
     trainer.train()
-    metrics = trainer.evaluate()
-    print(json.dumps({"eval": metrics}, indent=2))
 
     trainer.save_model(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
 
 
 if __name__ == "__main__":
