@@ -39,6 +39,7 @@ for model_name in "${MODELS[@]}"; do
       --output-dir "${model_out}/math_l${level}" \
       --output-prefix math_l${level}_tot \
       --sample-batch-size 16 \
+      --max-samples 300 \
       --rollouts-per-candidate 8 \
       --rollout-batch-size 125 \
       --log-per-sample
