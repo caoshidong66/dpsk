@@ -925,22 +925,35 @@ def main() -> None:
                     cache_path = default_cache
             if cache_path is None:
                 return None
-            if not cache_path.exists():
+            is_rank0_local = True
+            if using_ddp and dist.is_initialized():
+                is_rank0_local = dist.get_rank() == 0
+            if not cache_path.exists() or cache_path.stat().st_size == 0:
                 if eval_num_samples is None:
                     raise FileNotFoundError(f"--eval-id-cache not found: {cache_path}")
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                indices: List[int] = []
-                for idx, _raw in enumerate(
-                    iter_samples(eval_dataset_name, eval_root, split=eval_split)
-                ):
-                    indices.append(idx)
-                rng = random.Random(int(args.seed))
-                rng.shuffle(indices)
-                indices = indices[: int(eval_num_samples)]
-                with cache_path.open("w", encoding="utf-8") as f:
-                    json.dump({"indices": indices}, f, ensure_ascii=False, indent=2)
+                if is_rank0_local:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    indices: List[int] = []
+                    for idx, _raw in enumerate(
+                        iter_samples(eval_dataset_name, eval_root, split=eval_split)
+                    ):
+                        indices.append(idx)
+                    rng = random.Random(int(args.seed))
+                    rng.shuffle(indices)
+                    indices = indices[: int(eval_num_samples)]
+                    with cache_path.open("w", encoding="utf-8") as f:
+                        json.dump({"indices": indices}, f, ensure_ascii=False, indent=2)
+                if using_ddp and dist.is_initialized():
+                    dist.barrier()
             with cache_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
+                try:
+                    data = json.load(f)
+                except json.JSONDecodeError:
+                    if not is_rank0_local:
+                        if using_ddp and dist.is_initialized():
+                            dist.barrier()
+                    with cache_path.open("r", encoding="utf-8") as retry_f:
+                        data = json.load(retry_f)
             indices = data.get("indices") if isinstance(data, dict) else None
             if not isinstance(indices, list) or not all(isinstance(i, int) for i in indices):
                 raise ValueError(f"Invalid eval id cache format: {cache_path}")
