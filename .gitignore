@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# Datasets (CRITICAL)
+datas/
+datas_*/
+
+# Checkpoints / logs
+checkpoints/
+logs/
+outputs/
