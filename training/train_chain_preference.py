@@ -55,7 +55,9 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-LOCAL_BASE="${LOCAL_SCRATCH:-$HOME/local}"
+LOCAL_BASE = os.environ.get(
+    "LOCAL_SCRATCH", os.path.join(os.path.expanduser("~"), "local")
+)
 os.environ["TMPDIR"] = f"{LOCAL_BASE}/tmp"
 os.environ["TEMP"] = f"{LOCAL_BASE}/tmp"
 os.environ["TMP"] = f"{LOCAL_BASE}/tmp"
@@ -65,6 +67,16 @@ os.environ["TORCH_COMPILE_DEBUG_DIR"] = f"{LOCAL_BASE}/torchcompile"
 os.environ["TRITON_CACHE_DIR"] = f"{LOCAL_BASE}/triton"
 os.environ["CUDA_CACHE_PATH"] = f"{LOCAL_BASE}/cuda"
 os.environ["XDG_CACHE_HOME"] = f"{LOCAL_BASE}/xdg_cache"
+
+for cache_dir in [
+    os.environ["TMPDIR"],
+    os.environ["TORCHINDUCTOR_CACHE_DIR"],
+    os.environ["TORCH_COMPILE_DEBUG_DIR"],
+    os.environ["TRITON_CACHE_DIR"],
+    os.environ["CUDA_CACHE_PATH"],
+    os.environ["XDG_CACHE_HOME"],
+]:
+    os.makedirs(cache_dir, exist_ok=True)
 
 
 # Allow running as `python training/train_chain_preference.py` from any CWD.
@@ -914,7 +926,19 @@ def main() -> None:
             if cache_path is None:
                 return None
             if not cache_path.exists():
-                raise FileNotFoundError(f"--eval-id-cache not found: {cache_path}")
+                if eval_num_samples is None:
+                    raise FileNotFoundError(f"--eval-id-cache not found: {cache_path}")
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                indices: List[int] = []
+                for idx, _raw in enumerate(
+                    iter_samples(eval_dataset_name, eval_root, split=eval_split)
+                ):
+                    indices.append(idx)
+                rng = random.Random(int(args.seed))
+                rng.shuffle(indices)
+                indices = indices[: int(eval_num_samples)]
+                with cache_path.open("w", encoding="utf-8") as f:
+                    json.dump({"indices": indices}, f, ensure_ascii=False, indent=2)
             with cache_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             indices = data.get("indices") if isinstance(data, dict) else None
