@@ -1174,14 +1174,12 @@ def main() -> None:
                 if accelerator.is_main_process:
                     unwrapped = accelerator.unwrap_model(model)
                     unwrapped.save_pretrained(str(epoch_dir))
-                    tokenizer.save_pretrained(str(epoch_dir))
                     print(f"[chain_pref] saved epoch {epoch + 1} -> {epoch_dir}")
                 accelerator.wait_for_everyone()
             else:
                 if not using_ddp or dist.get_rank() == 0:
                     to_save = _unwrap_ddp(model)
                     to_save.save_pretrained(str(epoch_dir))
-                    tokenizer.save_pretrained(str(epoch_dir))
                     print(f"[chain_pref] saved epoch {epoch + 1} -> {epoch_dir}")
                 if using_ddp and dist.is_initialized():
                     dist.barrier()
@@ -1199,13 +1197,11 @@ def main() -> None:
         if accelerator.is_main_process:
             unwrapped = accelerator.unwrap_model(model)
             unwrapped.save_pretrained(str(out_dir))
-            tokenizer.save_pretrained(str(out_dir))
             print(f"[chain_pref] saved -> {out_dir}")
     else:
         if is_rank0:
             to_save = _unwrap_ddp(model)
             to_save.save_pretrained(str(out_dir))
-            tokenizer.save_pretrained(str(out_dir))
             print(f"[chain_pref] saved -> {out_dir}")
         if using_ddp and dist.is_initialized():
             dist.barrier()
