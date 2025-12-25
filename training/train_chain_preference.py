@@ -850,6 +850,185 @@ def main() -> None:
     elif using_ddp:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
+    def _unwrap_ddp(m):
+        return m.module if isinstance(m, DDP) else m
+
+    def _run_eval_phase(phase_label: str) -> None:
+        is_rank0 = True
+        if using_ddp and dist.is_initialized():
+            is_rank0 = dist.get_rank() == 0
+        if accelerator is None:
+            if is_rank0:
+                print(f"[chain_pref] running {phase_label}...")
+        elif accelerator.is_main_process:
+            print(f"[chain_pref] running {phase_label}...")
+
+        eval_dataset_name = "hendrycks_math"
+        eval_split = "test"
+        eval_level = None
+        eval_id_cache = args.eval_id_cache
+        eval_num_samples = args.eval_num_samples if args.eval_num_samples is not None else 64
+        if args.tot_jsonl:
+            lower = str(args.tot_jsonl).lower()
+            if "gsm8k" in lower:
+                eval_dataset_name = "gsm8k"
+            elif "svamp" in lower:
+                eval_dataset_name = "svamp"
+            elif "hendrycks" in lower or "math" in lower:
+                eval_dataset_name = "hendrycks_math"
+                for lvl in ["l1", "l2", "l3", "l4", "l5"]:
+                    if f"_{lvl}" in lower or f"{lvl}" in lower:
+                        try:
+                            eval_level = int(lvl[-1])
+                        except ValueError:
+                            eval_level = None
+                        break
+
+        eval_root = args.eval_dataset_root or default_dataset_path(eval_dataset_name)
+
+        def _load_eval_indices() -> Optional[List[int]]:
+            cache_path = None
+            if eval_id_cache:
+                cache_path = Path(eval_id_cache)
+            elif eval_dataset_name == "hendrycks_math" and eval_level is not None and eval_num_samples:
+                default_cache = (
+                    _REPO_ROOT
+                    / "datas"
+                    / "eval_ids"
+                    / f"hendrycks_level{eval_level}_{eval_split}_{int(eval_num_samples)}.json"
+                )
+                if default_cache.exists():
+                    cache_path = default_cache
+            if cache_path is None:
+                return None
+            if not cache_path.exists():
+                raise FileNotFoundError(f"--eval-id-cache not found: {cache_path}")
+            with cache_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            indices = data.get("indices") if isinstance(data, dict) else None
+            if not isinstance(indices, list) or not all(isinstance(i, int) for i in indices):
+                raise ValueError(f"Invalid eval id cache format: {cache_path}")
+            if eval_num_samples is not None:
+                return indices[: int(eval_num_samples)]
+            return indices
+
+        eval_indices = _load_eval_indices()
+
+        def _iter_eval_samples():
+            count = 0
+            if eval_indices is not None:
+                wanted = set(eval_indices)
+                collected: Dict[int, Dict[str, object]] = {}
+                for idx, raw in enumerate(iter_samples(eval_dataset_name, eval_root, split=eval_split)):
+                    if idx not in wanted:
+                        continue
+                    sample = normalize_sample(eval_dataset_name, raw)
+                    collected[idx] = sample
+                    if len(collected) >= len(wanted):
+                        break
+                for idx in eval_indices:
+                    sample = collected.get(idx)
+                    if sample is None:
+                        continue
+                    yield sample
+                    count += 1
+                    if eval_num_samples is not None and count >= int(eval_num_samples):
+                        break
+                return
+
+            for raw in iter_samples(eval_dataset_name, eval_root, split=eval_split):
+                sample = normalize_sample(eval_dataset_name, raw)
+                if eval_dataset_name == "hendrycks_math" and eval_level is not None:
+                    lvl = sample.get("level")
+                    if isinstance(lvl, str):
+                        if str(eval_level) not in lvl:
+                            continue
+                    elif isinstance(lvl, int):
+                        if int(lvl) != eval_level:
+                            continue
+                    else:
+                        continue
+                yield sample
+                count += 1
+                if eval_num_samples is not None and count >= int(eval_num_samples):
+                    break
+
+        def _run_eval():
+            correct = 0
+            total = 0
+            gen_model = _unwrap_ddp(model)
+            was_training = gen_model.training
+            gen_model.eval()
+            for sample in _iter_eval_samples():
+                problem = (
+                    sample.get("problem")
+                    or sample.get("question")
+                    or sample.get("prompt")
+                )
+                if not problem:
+                    continue
+                solution = sample.get("solution") or sample.get("answer")
+                level = sample.get("level")
+                if eval_dataset_name in {"gsm8k", "svamp"}:
+                    num_steps = steps_for_dataset(eval_dataset_name)
+                else:
+                    num_steps = steps_for_level(level)
+                prompt = (
+                    "You are an expert math problem solver. "
+                    "You must reason step by step and avoid logical or arithmetic mistakes.\n\n"
+                    "Solve the following math problem.\n"
+                    f"You MUST use exactly {num_steps} reasoning steps, "
+                    "After the reasoning, output the final answer in the last line "
+                    "using the format: `Answer: <final_answer>`.\n\n"
+                    f"Problem: {problem}\n\n"
+                    "Reasoning step by step:\n"
+                    "Step 1:"
+                )
+                encoded = tokenizer(prompt, return_tensors="pt")
+                input_ids = encoded["input_ids"].to(device)
+                attention_mask = encoded.get("attention_mask")
+                if attention_mask is not None:
+                    attention_mask = attention_mask.to(device)
+                with torch.inference_mode():
+                    output_ids = gen_model.generate(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=1024,
+                        do_sample=True,
+                        temperature=0.2,
+                        top_p=0.95,
+                        pad_token_id=tokenizer.eos_token_id,
+                    )
+                generated = output_ids[0, input_ids.shape[1] :]
+                completion = tokenizer.decode(generated, skip_special_tokens=True)
+                is_correct_flag = False
+                if solution is not None:
+                    is_correct_flag = is_model_correct(completion, solution)
+                if is_correct_flag:
+                    correct += 1
+                total += 1
+                if total % 10 == 0:
+                    print(f"[chain_pref][eval] processed {total}")
+            if was_training:
+                gen_model.train()
+            acc = (correct / total) if total > 0 else None
+            return {"num_samples": total, "num_correct": correct, "accuracy": acc}
+
+        if accelerator is not None:
+            if accelerator.is_main_process:
+                eval_summary = _run_eval()
+                print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
+            accelerator.wait_for_everyone()
+        else:
+            if is_rank0:
+                eval_summary = _run_eval()
+                print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
+            if using_ddp and dist.is_initialized():
+                dist.barrier()
+
+    if args.eval_after_train:
+        _run_eval_phase("eval-before-train")
+
     model.train()
     for epoch in range(args.epochs):
         if using_ddp and sampler is not None:
@@ -882,176 +1061,8 @@ def main() -> None:
                 elif accelerator.is_main_process:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
 
-    def _unwrap_ddp(m):
-        return m.module if isinstance(m, DDP) else m
-
     if args.eval_after_train:
-        if using_ddp:
-            rank = dist.get_rank()
-            if rank != 0:
-                dist.destroy_process_group()
-                return
-            dist.destroy_process_group()
-            using_ddp = False
-        if accelerator is None:
-            print("[chain_pref] running eval-after-train...")
-        elif accelerator.is_main_process:
-            print("[chain_pref] running eval-after-train...")
-
-        eval_dataset_name = "hendrycks_math"
-        eval_split = "test"
-        eval_level = None
-        eval_id_cache = args.eval_id_cache
-        if args.tot_jsonl:
-            lower = str(args.tot_jsonl).lower()
-            if "gsm8k" in lower:
-                eval_dataset_name = "gsm8k"
-            elif "svamp" in lower:
-                eval_dataset_name = "svamp"
-            elif "hendrycks" in lower or "math" in lower:
-                eval_dataset_name = "hendrycks_math"
-                for lvl in ["l1", "l2", "l3", "l4", "l5"]:
-                    if f"_{lvl}" in lower or f"{lvl}" in lower:
-                        try:
-                            eval_level = int(lvl[-1])
-                        except ValueError:
-                            eval_level = None
-                        break
-
-        eval_root = args.eval_dataset_root or default_dataset_path(eval_dataset_name)
-
-        def _load_eval_indices() -> Optional[List[int]]:
-            cache_path = None
-            if eval_id_cache:
-                cache_path = Path(eval_id_cache)
-            elif eval_dataset_name == "hendrycks_math" and eval_level is not None and args.eval_num_samples:
-                default_cache = (
-                    _REPO_ROOT
-                    / "datas"
-                    / "eval_ids"
-                    / f"hendrycks_level{eval_level}_{eval_split}_{int(args.eval_num_samples)}.json"
-                )
-                if default_cache.exists():
-                    cache_path = default_cache
-            if cache_path is None:
-                return None
-            if not cache_path.exists():
-                raise FileNotFoundError(f"--eval-id-cache not found: {cache_path}")
-            with cache_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            indices = data.get("indices") if isinstance(data, dict) else None
-            if not isinstance(indices, list) or not all(isinstance(i, int) for i in indices):
-                raise ValueError(f"Invalid eval id cache format: {cache_path}")
-            if args.eval_num_samples is not None:
-                return indices[: int(args.eval_num_samples)]
-            return indices
-
-        eval_indices = _load_eval_indices()
-
-        def _iter_eval_samples():
-            count = 0
-            if eval_indices is not None:
-                wanted = set(eval_indices)
-                collected: Dict[int, Dict[str, object]] = {}
-                for idx, raw in enumerate(iter_samples(eval_dataset_name, eval_root, split=eval_split)):
-                    if idx not in wanted:
-                        continue
-                    sample = normalize_sample(eval_dataset_name, raw)
-                    collected[idx] = sample
-                    if len(collected) >= len(wanted):
-                        break
-                for idx in eval_indices:
-                    sample = collected.get(idx)
-                    if sample is None:
-                        continue
-                    yield sample
-                    count += 1
-                    if args.eval_num_samples is not None and count >= int(args.eval_num_samples):
-                        break
-                return
-
-            for raw in iter_samples(eval_dataset_name, eval_root, split=eval_split):
-                sample = normalize_sample(eval_dataset_name, raw)
-                if eval_dataset_name == "hendrycks_math" and eval_level is not None:
-                    lvl = sample.get("level")
-                    if isinstance(lvl, str):
-                        if str(eval_level) not in lvl:
-                            continue
-                    elif isinstance(lvl, int):
-                        if int(lvl) != eval_level:
-                            continue
-                    else:
-                        continue
-                yield sample
-                count += 1
-                if args.eval_num_samples is not None and count >= int(args.eval_num_samples):
-                    break
-
-        def _run_eval():
-            correct = 0
-            total = 0
-            for sample in _iter_eval_samples():
-                problem = (
-                    sample.get("problem")
-                    or sample.get("question")
-                    or sample.get("prompt")
-                )
-                if not problem:
-                    continue
-                solution = sample.get("solution") or sample.get("answer")
-                level = sample.get("level")
-                if eval_dataset_name in {"gsm8k", "svamp"}:
-                    num_steps = steps_for_dataset(eval_dataset_name)
-                else:
-                    num_steps = steps_for_level(level)
-                prompt = (
-                    "You are an expert math problem solver. "
-                    "You must reason step by step and avoid logical or arithmetic mistakes.\n\n"
-                    "Solve the following math problem.\n"
-                    f"You MUST use exactly {num_steps} reasoning steps, "
-                    "After the reasoning, output the final answer in the last line "
-                    "using the format: `Answer: <final_answer>`.\n\n"
-                    f"Problem: {problem}\n\n"
-                    "Reasoning step by step:\n"
-                    "Step 1:"
-                )
-                encoded = tokenizer(prompt, return_tensors="pt")
-                input_ids = encoded["input_ids"].to(device)
-                attention_mask = encoded.get("attention_mask")
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(device)
-                with torch.no_grad():
-                    gen_model = _unwrap_ddp(model)
-                    output_ids = gen_model.generate(
-                        input_ids,
-                        attention_mask=attention_mask,
-                        max_new_tokens=512,
-                        do_sample=True,
-                        temperature=0.2,
-                        top_p=0.95,
-                        pad_token_id=tokenizer.eos_token_id,
-                    )
-                generated = output_ids[0, input_ids.shape[1] :]
-                completion = tokenizer.decode(generated, skip_special_tokens=True)
-                is_correct_flag = False
-                if solution is not None:
-                    is_correct_flag = is_model_correct(completion, solution)
-                if is_correct_flag:
-                    correct += 1
-                total += 1
-                if total % 10 == 0:
-                    print(f"[chain_pref][eval] processed {total}")
-            acc = (correct / total) if total > 0 else None
-            return {"num_samples": total, "num_correct": correct, "accuracy": acc}
-
-        if accelerator is not None:
-            if accelerator.is_main_process:
-                eval_summary = _run_eval()
-                print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
-            accelerator.wait_for_everyone()
-        else:
-            eval_summary = _run_eval()
-            print(json.dumps({"eval": eval_summary}, ensure_ascii=False, indent=2))
+        _run_eval_phase("eval-after-train")
 
     out_dir = Path(args.output_dir)
     if getattr(args, "use_lora", False):
@@ -1070,10 +1081,14 @@ def main() -> None:
             tokenizer.save_pretrained(str(out_dir))
             print(f"[chain_pref] saved -> {out_dir}")
     else:
-        to_save = _unwrap_ddp(model)
-        to_save.save_pretrained(str(out_dir))
-        tokenizer.save_pretrained(str(out_dir))
-        print(f"[chain_pref] saved -> {out_dir}")
+        if is_rank0:
+            to_save = _unwrap_ddp(model)
+            to_save.save_pretrained(str(out_dir))
+            tokenizer.save_pretrained(str(out_dir))
+            print(f"[chain_pref] saved -> {out_dir}")
+        if using_ddp and dist.is_initialized():
+            dist.barrier()
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":
