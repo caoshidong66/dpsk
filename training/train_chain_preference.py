@@ -549,6 +549,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--beta", type=float, default=0.1, help="Inverse temperature for DPO loss.")
     parser.add_argument("--gamma", type=float, default=2.0, help="Reward sharpening parameter.")
     parser.add_argument("--epochs", type=int, default=1, help="Training epochs.")
+    parser.add_argument(
+        "--save-per-epoch",
+        action="store_true",
+        help="Save checkpoints (LoRA adapters or full model) at the end of each epoch.",
+    )
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size (num examples).")
     parser.add_argument(
         "--max-steps",
@@ -1114,6 +1119,14 @@ def main() -> None:
     if args.eval_after_train and not using_ddp:
         _run_eval_phase("eval-before-train")
 
+    out_dir = Path(args.output_dir)
+    if getattr(args, "use_lora", False):
+        base = Path(args.weights_dir)
+        if out_dir.is_absolute():
+            out_dir = base / out_dir.name
+        else:
+            out_dir = base / out_dir
+
     model.train()
     global_step = 0
     for epoch in range(args.epochs):
@@ -1153,19 +1166,32 @@ def main() -> None:
                 elif accelerator.is_main_process:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
 
+        if args.save_per_epoch:
+            epoch_dir = Path(f"{out_dir}_epoch{epoch + 1}")
+            epoch_dir.mkdir(parents=True, exist_ok=True)
+            if accelerator is not None:
+                accelerator.wait_for_everyone()
+                if accelerator.is_main_process:
+                    unwrapped = accelerator.unwrap_model(model)
+                    unwrapped.save_pretrained(str(epoch_dir))
+                    tokenizer.save_pretrained(str(epoch_dir))
+                    print(f"[chain_pref] saved epoch {epoch + 1} -> {epoch_dir}")
+                accelerator.wait_for_everyone()
+            else:
+                if not using_ddp or dist.get_rank() == 0:
+                    to_save = _unwrap_ddp(model)
+                    to_save.save_pretrained(str(epoch_dir))
+                    tokenizer.save_pretrained(str(epoch_dir))
+                    print(f"[chain_pref] saved epoch {epoch + 1} -> {epoch_dir}")
+                if using_ddp and dist.is_initialized():
+                    dist.barrier()
+
     if progress is not None:
         progress.close()
 
     if args.eval_after_train and not using_ddp:
         _run_eval_phase("eval-after-train")
 
-    out_dir = Path(args.output_dir)
-    if getattr(args, "use_lora", False):
-        base = Path(args.weights_dir)
-        if out_dir.is_absolute():
-            out_dir = base / out_dir.name
-        else:
-            out_dir = base / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if accelerator is not None:
