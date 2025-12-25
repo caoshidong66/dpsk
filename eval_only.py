@@ -179,6 +179,7 @@ def main() -> None:
         dtype="bfloat16",
         tensor_parallel_size=1,
         enable_lora=enable_lora,
+        enforce_eager=True,
     )
     sampling_params = SamplingParams(
         temperature=0.0,
@@ -187,7 +188,23 @@ def main() -> None:
     )
     lora_request = None
     if args.lora_dir:
-        lora_request = LoRARequest(args.lora_name, 1, args.lora_dir, args.lora_scaling)
+        try:
+            lora_request = LoRARequest(
+                lora_name=args.lora_name,
+                lora_id=1,
+                lora_path=args.lora_dir,
+                lora_scale=args.lora_scaling,
+            )
+        except TypeError:
+            try:
+                lora_request = LoRARequest(
+                    lora_name=args.lora_name,
+                    lora_id=1,
+                    lora_path=args.lora_dir,
+                    lora_scaling=args.lora_scaling,
+                )
+            except TypeError:
+                lora_request = LoRARequest(args.lora_name, 1, args.lora_dir)
 
     total = 0
     correct = 0
