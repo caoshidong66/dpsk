@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shard-id", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--output-json", type=str, default=None)
+    parser.add_argument("--progress", action="store_true", help="Show a progress bar.")
     return parser.parse_args()
 
 
@@ -144,6 +145,21 @@ def main() -> None:
         num_samples=args.num_samples,
         seed=args.seed,
     )
+    if indices is not None:
+        total_expected = sum(
+            1 for i in range(len(indices)) if i % args.num_shards == args.shard_id
+        )
+    else:
+        total_expected = None
+
+    progress = None
+    if args.progress:
+        try:
+            from tqdm import tqdm  # type: ignore
+
+            progress = tqdm(total=total_expected, desc="Eval", unit="sample")
+        except Exception:
+            progress = None
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir, use_fast=False)
     if tokenizer.pad_token is None:
@@ -194,12 +210,16 @@ def main() -> None:
             correct += 1
         total += 1
         processed += 1
-        if processed % 20 == 0:
+        if progress is not None:
+            progress.update(1)
+        elif processed % 20 == 0:
             print(f"[eval] shard {args.shard_id} processed {processed}", flush=True)
 
     acc = (correct / total) if total > 0 else None
     result = {"num_samples": total, "num_correct": correct, "accuracy": acc}
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if progress is not None:
+        progress.close()
 
     if args.output_json:
         out_path = Path(args.output_json)
