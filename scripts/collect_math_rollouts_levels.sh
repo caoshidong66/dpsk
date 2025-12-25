@@ -13,10 +13,10 @@ MODELS=(
   "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
-GPUS="6"
+GPUS="0,1,2,3,4,5,6,7"
 OUT_ROOT="datas/all300"
 export TORCH_COMPILE_DISABLE=1
-export VLLM_GPU_MEMORY_UTILIZATION=0.7
+export VLLM_GPU_MEMORY_UTILIZATION=0.5
 export VLLM_DISABLE_PROGRESS_BAR=1
 export VLLM_LOGGING_LEVEL=ERROR
 MATH_PATH="../data/hendrycks_math"
@@ -40,7 +40,7 @@ for model_name in "${MODELS[@]}"; do
       --output-prefix math_l${level}_tot \
       --sample-batch-size 16 \
       --rollouts-per-candidate 8 \
-      --rollout-batch-size 200 \
+      --rollout-batch-size 125 \
       --max-samples 300 \
       --log-per-sample
   done

@@ -16,7 +16,7 @@ MODELS=(
 GPUS="0,1,2,3,4,5,6,7"
 OUT_ROOT="datas_math_all"
 export TORCH_COMPILE_DISABLE=1
-export VLLM_GPU_MEMORY_UTILIZATION=0.9                            
+export VLLM_GPU_MEMORY_UTILIZATION=0.5                           
 export VLLM_DISABLE_PROGRESS_BAR=1
 export VLLM_LOGGING_LEVEL=ERROR
 MATH_PATH="../data/hendrycks_math"
@@ -40,7 +40,7 @@ for model_name in "${MODELS[@]}"; do
       --output-prefix math_l${level}_tot \
       --sample-batch-size 16 \
       --rollouts-per-candidate 8 \
-      --rollout-batch-size 250 \
+      --rollout-batch-size 125 \
       --log-per-sample
   done
 done
