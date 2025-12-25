@@ -61,7 +61,6 @@ for model_name in "${MODELS[@]}"; do
       --use-lora \
       --flatten-steps \
       --learning-rate 1e-4 \
-      --eval-after-train \
       --eval-num-samples "${NUM_SAMPLES}" \
       --eval-id-cache "${TEST_ID_DIR}/${dataset}_test_${NUM_SAMPLES}.json" \
       --eval-dataset-root "${eval_root}"

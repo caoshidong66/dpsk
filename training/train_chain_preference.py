@@ -1094,7 +1094,7 @@ def main() -> None:
             if using_ddp and dist.is_initialized():
                 dist.barrier()
 
-    if args.eval_after_train:
+    if args.eval_after_train and not using_ddp:
         _run_eval_phase("eval-before-train")
 
     model.train()
@@ -1129,7 +1129,7 @@ def main() -> None:
                 elif accelerator.is_main_process:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
 
-    if args.eval_after_train:
+    if args.eval_after_train and not using_ddp:
         _run_eval_phase("eval-after-train")
 
     out_dir = Path(args.output_dir)
