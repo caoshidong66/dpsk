@@ -1019,7 +1019,10 @@ def main() -> None:
             total = 0
             gen_model = _unwrap_ddp(model)
             was_training = gen_model.training
+            prev_use_cache = getattr(gen_model.config, "use_cache", None)
             gen_model.eval()
+            if prev_use_cache is not None:
+                gen_model.config.use_cache = True
             print("[rank0] eval: begin generate loop", flush=True)
             for sample in _iter_eval_samples():
                 print(f"[rank0] eval sample {total + 1} begin", flush=True)
@@ -1074,6 +1077,8 @@ def main() -> None:
                     print(f"[chain_pref][eval] processed {total}")
             if was_training:
                 gen_model.train()
+            if prev_use_cache is not None:
+                gen_model.config.use_cache = prev_use_cache
             acc = (correct / total) if total > 0 else None
             return {"num_samples": total, "num_correct": correct, "accuracy": acc}
 
