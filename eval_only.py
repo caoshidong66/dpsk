@@ -42,7 +42,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shard-id", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--output-json", type=str, default=None)
-    parser.add_argument("--progress", action="store_true", help="Show a progress bar.")
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable progress output.",
+    )
     return parser.parse_args()
 
 
@@ -153,7 +157,7 @@ def main() -> None:
         total_expected = None
 
     progress = None
-    if args.progress:
+    if not args.no_progress:
         try:
             from tqdm import tqdm  # type: ignore
 
@@ -212,7 +216,7 @@ def main() -> None:
         processed += 1
         if progress is not None:
             progress.update(1)
-        elif processed % 20 == 0:
+        else:
             print(f"[eval] shard {args.shard_id} processed {processed}", flush=True)
 
     acc = (correct / total) if total > 0 else None
