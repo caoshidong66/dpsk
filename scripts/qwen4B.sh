@@ -10,6 +10,8 @@ MODEL_ROOT="../model"
 MODELS=(
   "Meta-Llama-3-8B"
   "Meta-Llama-3-8B-Instruct"
+  "Qwen3-4B-Instruct-2507"
+  "Qwen3-8B"
 )
 GPUS="0,1,2,3,4,5,6,7"
 OUT_ROOT="datas_math_all"
