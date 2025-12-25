@@ -4,7 +4,8 @@ set -euo pipefail
 # Paths you likely need to customize.
 DATA_ROOT="../data/hendrycks_math"
 MODEL_DIR="../model/Meta-Llama-3-8B"
-NUM_SAMPLES=300
+NUM_SAMPLES=500
+TEST_ID_DIR="datas/test_id"
 GPU_IDS="1"
 NUM_GPUS=1
 
@@ -16,6 +17,7 @@ TOT_JSONL[4]="datas/tot_math_l4/math_l4.20251215_203600.all.jsonl"
 TOT_JSONL[5]="datas/tot_math_l5/math_l5.20251216_011244.all.jsonl"
 
 RESULTS_FILE="outputs/chain_pref_eval_results.jsonl"
+mkdir -p "${TEST_ID_DIR}"
 mkdir -p "$(dirname "${RESULTS_FILE}")"
 
 for level in 1 2 3 4 5; do
@@ -42,7 +44,7 @@ for level in 1 2 3 4 5; do
     --learning-rate 1e-5 \
     --eval-after-train \
     --eval-num-samples "${NUM_SAMPLES}" \
-    --eval-id-cache "datas/eval_ids/hendrycks_level${level}_test_${NUM_SAMPLES}.json" \
+    --eval-id-cache "${TEST_ID_DIR}/hendrycks_level${level}_test_${NUM_SAMPLES}.json" \
     --eval-dataset-root "${DATA_ROOT}"
 
   echo "[run] level ${level}: eval base (CoT only)"
