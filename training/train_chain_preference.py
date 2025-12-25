@@ -55,6 +55,18 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
+LOCAL_BASE="${LOCAL_SCRATCH:-$HOME/local}"
+os.environ["TMPDIR"] = f"{LOCAL_BASE}/tmp"
+os.environ["TEMP"] = f"{LOCAL_BASE}/tmp"
+os.environ["TMP"] = f"{LOCAL_BASE}/tmp"
+
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = f"{LOCAL_BASE}/torchinductor"
+os.environ["TORCH_COMPILE_DEBUG_DIR"] = f"{LOCAL_BASE}/torchcompile"
+os.environ["TRITON_CACHE_DIR"] = f"{LOCAL_BASE}/triton"
+os.environ["CUDA_CACHE_PATH"] = f"{LOCAL_BASE}/cuda"
+os.environ["XDG_CACHE_HOME"] = f"{LOCAL_BASE}/xdg_cache"
+
+
 # Allow running as `python training/train_chain_preference.py` from any CWD.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:

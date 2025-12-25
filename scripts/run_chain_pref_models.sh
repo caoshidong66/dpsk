@@ -7,8 +7,8 @@ NUM_SAMPLES=500
 TEST_ID_DIR="datas/test_id"
 
 # Multi-GPU training (DDP).
-TRAIN_GPU_IDS="0,1,2,3"
-TRAIN_NUM_GPUS=4
+TRAIN_GPU_IDS="0,1,2,3,4,5,6,7"
+TRAIN_NUM_GPUS=8
 
 DATASETS=(
   "gsm8k"
@@ -60,7 +60,7 @@ for model_name in "${MODELS[@]}"; do
       --device-map none \
       --use-lora \
       --flatten-steps \
-      --learning-rate 1e-5 \
+      --learning-rate 1e-4 \
       --eval-after-train \
       --eval-num-samples "${NUM_SAMPLES}" \
       --eval-id-cache "${TEST_ID_DIR}/${dataset}_test_${NUM_SAMPLES}.json" \
