@@ -27,6 +27,19 @@ def resolve_model_dir(model_dir: PathLike) -> str:
 _VLLM_ENGINES: Dict[str, Any] = {}
 
 
+def _get_vllm_gpu_mem_util() -> Optional[float]:
+    value = os.environ.get("VLLM_GPU_MEMORY_UTILIZATION")
+    if not value:
+        return None
+    try:
+        util = float(value)
+    except ValueError:
+        return None
+    if util <= 0 or util > 1:
+        return None
+    return util
+
+
 def get_vllm_engine(model_dir_str: str):
     """
     Lazily construct and cache a vLLM engine. Import vLLM only when the user
@@ -45,11 +58,15 @@ def get_vllm_engine(model_dir_str: str):
     engine = _VLLM_ENGINES.get(key)
     if engine is not None:
         return engine
-    engine = LLM(
-        model=model_dir_str,
-        dtype="bfloat16",
-        tokenizer_mode="auto",
-    )
+    engine_kwargs: Dict[str, Any] = {
+        "model": model_dir_str,
+        "dtype": "bfloat16",
+        "tokenizer_mode": "auto",
+    }
+    gpu_mem_util = _get_vllm_gpu_mem_util()
+    if gpu_mem_util is not None:
+        engine_kwargs["gpu_memory_utilization"] = gpu_mem_util
+    engine = LLM(**engine_kwargs)
     _VLLM_ENGINES[key] = engine
     return engine
 
