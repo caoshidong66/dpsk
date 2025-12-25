@@ -881,11 +881,16 @@ def main() -> None:
         is_rank0 = True
         if using_ddp and dist.is_initialized():
             is_rank0 = dist.get_rank() == 0
+        if using_ddp and dist.is_initialized() and not is_rank0 and accelerator is None:
+            dist.barrier()
+            return
         if accelerator is None:
             if is_rank0:
                 print(f"[chain_pref] running {phase_label}...")
         elif accelerator.is_main_process:
             print(f"[chain_pref] running {phase_label}...")
+        if accelerator is None and is_rank0:
+            print("[rank0] eval: start", flush=True)
 
         eval_dataset_name = "hendrycks_math"
         eval_split = "test"
@@ -909,6 +914,11 @@ def main() -> None:
                         break
 
         eval_root = args.eval_dataset_root or default_dataset_path(eval_dataset_name)
+        if accelerator is None and is_rank0:
+            print(
+                f"[rank0] eval: root={eval_root} cache={eval_id_cache}",
+                flush=True,
+            )
 
         def _load_eval_indices() -> Optional[List[int]]:
             cache_path = None
@@ -962,6 +972,8 @@ def main() -> None:
             return indices
 
         eval_indices = _load_eval_indices()
+        if accelerator is None and is_rank0:
+            print("[rank0] eval: load indices done", flush=True)
 
         def _iter_eval_samples():
             count = 0
@@ -1008,7 +1020,9 @@ def main() -> None:
             gen_model = _unwrap_ddp(model)
             was_training = gen_model.training
             gen_model.eval()
+            print("[rank0] eval: begin generate loop", flush=True)
             for sample in _iter_eval_samples():
+                print(f"[rank0] eval sample {total + 1} begin", flush=True)
                 problem = (
                     sample.get("problem")
                     or sample.get("question")
