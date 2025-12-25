@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
+from vllm.lora.request import LoRARequest
 
 from dataset_utils import default_dataset_path, iter_samples, normalize_sample
 from tool import is_model_correct
@@ -37,7 +39,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--id-cache", type=str, default=None)
     parser.add_argument("--model-dir", type=str, required=True)
-    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--lora-dir", type=str, default=None)
+    parser.add_argument("--lora-name", type=str, default="eval_lora")
+    parser.add_argument("--lora-scaling", type=float, default=1.0)
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--shard-id", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
@@ -169,11 +173,21 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_dir)
-    device = torch.device(args.device)
-    model.to(device)
-    model.eval()
-    model.config.use_cache = True
+    enable_lora = args.lora_dir is not None
+    llm = LLM(
+        model=args.model_dir,
+        dtype="bfloat16",
+        tensor_parallel_size=1,
+        enable_lora=enable_lora,
+    )
+    sampling_params = SamplingParams(
+        temperature=0.0,
+        top_p=1.0,
+        max_tokens=args.max_new_tokens,
+    )
+    lora_request = None
+    if args.lora_dir:
+        lora_request = LoRARequest(args.lora_name, 1, args.lora_dir, args.lora_scaling)
 
     total = 0
     correct = 0
@@ -194,22 +208,12 @@ def main() -> None:
             continue
         solution = sample.get("solution") or sample.get("answer")
         prompt = f"Solve the problem and give the final answer.\nProblem: {problem}\nAnswer:"
-        encoded = tokenizer(prompt, return_tensors="pt")
-        input_ids = encoded["input_ids"].to(device)
-        attention_mask = encoded.get("attention_mask")
-        if attention_mask is not None:
-            attention_mask = attention_mask.to(device)
-        with torch.inference_mode():
-            output_ids = model.generate(
-                input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=args.max_new_tokens,
-                do_sample=False,
-                num_beams=1,
-                pad_token_id=tokenizer.eos_token_id,
-            )
-        generated = output_ids[0, input_ids.shape[1] :]
-        completion = tokenizer.decode(generated, skip_special_tokens=True)
+        outputs = llm.generate(
+            [prompt],
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+        )
+        completion = outputs[0].outputs[0].text
         if solution is not None and is_model_correct(completion, solution):
             correct += 1
         total += 1

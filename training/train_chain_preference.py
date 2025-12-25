@@ -874,6 +874,23 @@ def main() -> None:
     elif using_ddp:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
+    progress = None
+    if accelerator is not None:
+        if accelerator.is_main_process:
+            try:
+                from tqdm import tqdm  # type: ignore
+
+                progress = tqdm(total=total_steps, desc="Train", unit="step")
+            except Exception:
+                progress = None
+    elif not using_ddp or dist.get_rank() == 0:
+        try:
+            from tqdm import tqdm  # type: ignore
+
+            progress = tqdm(total=total_steps, desc="Train", unit="step")
+        except Exception:
+            progress = None
+
     def _unwrap_ddp(m):
         return m.module if isinstance(m, DDP) else m
 
@@ -1098,6 +1115,7 @@ def main() -> None:
         _run_eval_phase("eval-before-train")
 
     model.train()
+    global_step = 0
     for epoch in range(args.epochs):
         if using_ddp and sampler is not None:
             sampler.set_epoch(epoch)
@@ -1122,12 +1140,21 @@ def main() -> None:
                 scheduler.step()
                 optimizer.zero_grad()
 
+            global_step += 1
+            if progress is not None:
+                progress.update(1)
+            elif (not using_ddp or dist.get_rank() == 0) and global_step % 10 == 0:
+                print(f"[chain_pref] progress {global_step}/{total_steps}")
+
             if step % 10 == 0:
                 if accelerator is None:
                     if not using_ddp or dist.get_rank() == 0:
                         print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
                 elif accelerator.is_main_process:
                     print(f"[chain_pref] epoch {epoch + 1}, step {step}, loss={loss.item():.4f}")
+
+    if progress is not None:
+        progress.close()
 
     if args.eval_after_train and not using_ddp:
         _run_eval_phase("eval-after-train")
