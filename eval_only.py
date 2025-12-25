@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-name", type=str, default="eval_lora")
     parser.add_argument("--lora-scaling", type=float, default=1.0)
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--shard-id", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--output-json", type=str, default=None)
@@ -209,6 +210,31 @@ def main() -> None:
     total = 0
     correct = 0
     processed = 0
+    batch_prompts: List[str] = []
+    batch_solutions: List[Optional[str]] = []
+
+    def _flush_batch() -> None:
+        nonlocal total, correct, processed, batch_prompts, batch_solutions
+        if not batch_prompts:
+            return
+        outputs = llm.generate(
+            batch_prompts,
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+        )
+        for out, solution in zip(outputs, batch_solutions):
+            completion = out.outputs[0].text if out.outputs else ""
+            if solution is not None and is_model_correct(completion, solution):
+                correct += 1
+            total += 1
+            processed += 1
+            if progress is not None:
+                progress.update(1)
+            else:
+                print(f"[eval] shard {args.shard_id} processed {processed}", flush=True)
+        batch_prompts = []
+        batch_solutions = []
+
     for sample_idx, sample in enumerate(
         _iter_samples(
             dataset_name=args.dataset_name,
@@ -225,20 +251,12 @@ def main() -> None:
             continue
         solution = sample.get("solution") or sample.get("answer")
         prompt = f"Solve the problem and give the final answer.\nProblem: {problem}\nAnswer:"
-        outputs = llm.generate(
-            [prompt],
-            sampling_params=sampling_params,
-            lora_request=lora_request,
-        )
-        completion = outputs[0].outputs[0].text
-        if solution is not None and is_model_correct(completion, solution):
-            correct += 1
-        total += 1
-        processed += 1
-        if progress is not None:
-            progress.update(1)
-        else:
-            print(f"[eval] shard {args.shard_id} processed {processed}", flush=True)
+        batch_prompts.append(prompt)
+        batch_solutions.append(solution)
+        if len(batch_prompts) >= int(args.batch_size):
+            _flush_batch()
+
+    _flush_batch()
 
     acc = (correct / total) if total > 0 else None
     result = {"num_samples": total, "num_correct": correct, "accuracy": acc}
