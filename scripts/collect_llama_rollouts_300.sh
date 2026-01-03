@@ -9,12 +9,11 @@ MODELS=(
   "Qwen3-8B"
 )
 GPUS="0,1,2,3,4,5,6,7"
-OUT_ROOT="datas"
+OUT_ROOT="datas_svamp_retest"
 export TORCH_COMPILE_DISABLE=1
 export VLLM_GPU_MEMORY_UTILIZATION=0.9
 export VLLM_DISABLE_PROGRESS_BAR=1
 export VLLM_LOGGING_LEVEL=ERROR
-GSM8K_PATH="../data/GSM8K"
 SVAMP_PATH="../data/SVAMP/SVAMP.json"
 
 mkdir -p "${OUT_ROOT}"
