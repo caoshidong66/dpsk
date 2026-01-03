@@ -12,6 +12,26 @@ def extract_model_answer(text: str) -> Optional[str]:
     if not text:
         return None
 
+    def _second_occurrence(haystack: str, needle: str) -> Optional[int]:
+        first = haystack.find(needle)
+        if first == -1:
+            return None
+        second = haystack.find(needle, first + len(needle))
+        return None if second == -1 else second
+
+    cut_positions = []
+    for marker in (
+        "\nProblem:",
+        "\nYou are an expert math problem solver",
+        "\nSolve the following math problem",
+        "\nReasoning step by step:",
+    ):
+        pos = _second_occurrence(text, marker)
+        if pos is not None:
+            cut_positions.append(pos)
+    if cut_positions:
+        text = text[: min(cut_positions)]
+
     lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
     # 从末尾往前找第一行以 "Answer:" 开头的
     for line in reversed(lines):
