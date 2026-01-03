@@ -16,6 +16,10 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import torch
 import torch.distributed as dist
 from torch.nn import functional as F
@@ -74,9 +78,6 @@ for cache_dir in [
 
 
 # Allow running as `python training/train_chain_preference.py` from any CWD.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def _apply_lora_from_config(model, cfg: Dict[str, Optional[object]]):
