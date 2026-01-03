@@ -99,6 +99,12 @@ def _normalize(ans: str) -> str:
     s = s.replace(" ", "")
     # 统一小写
     s = s.lower()
+    try:
+        if s:
+            num = float(s)
+            return format(num, ".15g")
+    except ValueError:
+        pass
     return s
 
 
