@@ -25,21 +25,6 @@ for model_name in "${MODELS[@]}"; do
   use_vllm_args=()
 
   python collect_tot.py \
-    --dataset-name gsm8k \
-    --dataset-path "${GSM8K_PATH}" \
-    --split train \
-    --gpus "${GPUS}" \
-    --model-dir "${model_dir}" \
-    --output-dir "${model_out}/gsm8k" \
-    --output-prefix gsm8k_tot \
-    --sample-batch-size 32 \
-    --rollouts-per-candidate 8 \
-    --rollout-batch-size 200 \
-    --max-samples 300 \
-    --log-per-sample \
-    "${use_vllm_args[@]}"
-
-  python collect_tot.py \
     --dataset-name svamp \
     --dataset-path "${SVAMP_PATH}" \
     --gpus "${GPUS}" \
