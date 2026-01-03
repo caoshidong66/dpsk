@@ -51,7 +51,7 @@ TRAIN_CONFIG: Dict[str, Optional[object]] = {
     "lora_dropout": 0.05,
     "lora_target_modules": "q_proj,v_proj",
     "lora_bias": "none",
-    "gpus": "1,2",  # e.g. "0,1,2,3"
+    "gpus": "1",  # e.g. "0,1,2,3"
 }
 
 
