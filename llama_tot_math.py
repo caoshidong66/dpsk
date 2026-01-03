@@ -297,6 +297,10 @@ def run_llama_tot_on_single(
         top_p=0.95,
         n=1,
         use_vllm=use_vllm,
+        stop_tokens=[
+            "\nProblem:",
+            "\nYou are an expert math problem solver",
+        ],
     )
     final_completion = (
         final_outputs_nested[0][0] if final_outputs_nested and final_outputs_nested[0] else ""
@@ -487,6 +491,10 @@ def run_llama_tot_on_batch(
         top_p=0.95,
         n=1,
         use_vllm=use_vllm,
+        stop_tokens=[
+            "\nProblem:",
+            "\nYou are an expert math problem solver",
+        ],
     )
     final_completions = [
         (texts[0] if texts else "") for texts in final_outputs_nested
