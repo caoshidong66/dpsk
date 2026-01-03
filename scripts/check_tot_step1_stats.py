@@ -99,6 +99,8 @@ def main() -> int:
             break
         if not raw:
             break
+        if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+            raw = raw[1:-1].strip()
         path = Path(raw).expanduser()
         if not path.exists():
             print(f"Not found: {path}")
