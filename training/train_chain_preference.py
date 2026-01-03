@@ -36,7 +36,7 @@ TRAIN_CONFIG: Dict[str, Optional[object]] = {
     "batch_size": 16,
     "grad_accum_steps": 1,
     "learning_rate": 2e-5,
-    "epochs": 1,
+    "epochs": 1000,
     "max_length": 1024,
     "beta": 0.1,
     "gamma": 2.0,
@@ -51,7 +51,7 @@ TRAIN_CONFIG: Dict[str, Optional[object]] = {
     "lora_dropout": 0.05,
     "lora_target_modules": "q_proj,v_proj",
     "lora_bias": "none",
-    "gpus": "0,1,2,3",  # e.g. "0,1,2,3"
+    "gpus": "1,2",  # e.g. "0,1,2,3"
 }
 
 
