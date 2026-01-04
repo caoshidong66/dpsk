@@ -9,9 +9,9 @@ DATA_ROOT="/home/comp/25480758/dpsk/datas"
 OUT_ROOT="outputs"
 
 MODELS=(
-  "Meta-Llama-3-8B-Instruct"
-  "Meta-Llama-3-8B"
-  "Qwen3-4B-Instruct-2507"
+  # "Meta-Llama-3-8B-Instruct"
+  # "Meta-Llama-3-8B"
+  # "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
 )
 
