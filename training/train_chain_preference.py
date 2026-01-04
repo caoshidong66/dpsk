@@ -426,8 +426,9 @@ def main() -> None:
     if args.gamma is not None:
         setattr(args, "gamma", float(args.gamma))
 
-    if isinstance(getattr(args, "gpus", None), str) and args.gpus.strip():
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus.strip()
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        if isinstance(getattr(args, "gpus", None), str) and args.gpus.strip():
+            os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus.strip()
 
     local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
     using_ddp = local_rank >= 0
