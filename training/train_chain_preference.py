@@ -51,6 +51,7 @@ TRAIN_CONFIG: Dict[str, Optional[object]] = {
     "lora_dropout": 0.05,
     "lora_target_modules": "q_proj,v_proj",
     "lora_bias": "none",
+    "gpus": "1",  # e.g. "0,1,2,3"
 }
 
 
@@ -425,6 +426,8 @@ def main() -> None:
     if args.gamma is not None:
         setattr(args, "gamma", float(args.gamma))
 
+    if isinstance(getattr(args, "gpus", None), str) and args.gpus.strip():
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus.strip()
 
     local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
     using_ddp = local_rank >= 0
