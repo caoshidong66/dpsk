@@ -28,7 +28,7 @@ latest_jsonl() {
 for model_name in "${MODELS[@]}"; do
   model_dir="${MODEL_ROOT}/${model_name}"
   data_dir="${DATA_ROOT}/${model_name}/gsm8k"
-  jsonl_path="$(latest_jsonl "${data_dir}/gsm8k.jsonl)"
+  jsonl_path="$(latest_jsonl "${data_dir}/gsm8k.jsonl"
   if [[ -z "${jsonl_path}" ]]; then
     echo "[chain_pref] skip ${model_name}: no gsm8k_tot jsonl under ${data_dir}" >&2
     continue
