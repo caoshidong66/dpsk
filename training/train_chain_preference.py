@@ -36,7 +36,7 @@ TRAIN_CONFIG: Dict[str, Optional[object]] = {
     "batch_size":4,
     "grad_accum_steps": 1,
     "learning_rate": 2e-5,
-    "epochs": 3,
+    "epochs": 3000,
     "max_length": 1024,
     "beta": 0.1,
     "gamma": 2.0,
