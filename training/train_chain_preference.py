@@ -33,7 +33,7 @@ from lora_utils import freeze_model, trainable_parameters
 
 
 TRAIN_CONFIG: Dict[str, Optional[object]] = {
-    "batch_size":8,
+    "batch_size":4,
     "grad_accum_steps": 1,
     "learning_rate": 2e-5,
     "epochs": 3,
