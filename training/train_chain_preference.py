@@ -33,7 +33,7 @@ from lora_utils import freeze_model, trainable_parameters
 
 
 TRAIN_CONFIG: Dict[str, Optional[object]] = {
-    "batch_size":1,
+    "batch_size":8,
     "grad_accum_steps": 1,
     "learning_rate": 2e-5,
     "epochs": 1000,
@@ -51,7 +51,7 @@ TRAIN_CONFIG: Dict[str, Optional[object]] = {
     "lora_dropout": 0.05,
     "lora_target_modules": "q_proj,v_proj",
     "lora_bias": "none",
-    "gpus": "1",  # e.g. "0,1,2,3"
+    "gpus": "1,4,5,6",  # e.g. "0,1,2,3"
 }
 
 
