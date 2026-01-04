@@ -467,7 +467,7 @@ def main() -> None:
         collate_fn=lambda x: x,
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
