@@ -3,14 +3,12 @@ set -euo pipefail
 
 MODEL_ROOT="../model"
 MODELS=(
-  "Qwen3-4B-Instruct-2507"
   "Qwen3-8B"
-  "Meta-Llama-3-8B-Instruct"
 )
 
 GPUS="0,1,2,3,4,5,6,7"
-DATASET_PATH="../data/SVAMP/SVAMP.json"
-OUT_ROOT="datas_svamp_retest"
+DATASET_PATH="../data/GSM8K"
+OUT_ROOT="datas_gsm8k_retest"
 
 for model_name in "${MODELS[@]}"; do
   model_dir="${MODEL_ROOT}/${model_name}"
@@ -18,8 +16,9 @@ for model_name in "${MODELS[@]}"; do
   mkdir -p "${output_dir}"
 
   python collect_tot.py \
-    --dataset-name svamp \
+    --dataset-name gsm8k \
     --dataset-path "${DATASET_PATH}" \
+    --split test \
     --gpus "${GPUS}" \
     --model-dir "${model_dir}" \
     --output-dir "${output_dir}" \
@@ -27,7 +26,7 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 16 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size 125 \
-    --max-samples 300 \
+    --max-samples 200 \
     --log-per-sample \
     --merge
 done
