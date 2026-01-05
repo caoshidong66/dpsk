@@ -26,7 +26,7 @@ for model_name in "${MODELS[@]}"; do
     --sample-batch-size 4 \
     --rollouts-per-candidate 8 \
     --rollout-batch-size  16\
-    --max-samples 20 \
+    --max-samples 1500 \
     --log-per-sample \
     --merge
 done
