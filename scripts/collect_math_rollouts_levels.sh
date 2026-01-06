@@ -8,13 +8,13 @@ set -euo pipefail
 
 MODEL_ROOT="../model"
 MODELS=(
-  "Meta-Llama-3-8B"
+  "Qwen3-8B"
   "Meta-Llama-3-8B-Instruct"
   "Qwen3-4B-Instruct-2507"
-  "Qwen3-8B"
+
 )
-GPUS="0,1,2,3,4,5,6,7"
-OUT_ROOT="datas/all300"
+GPUS="2"
+OUT_ROOT="datas/all300_case"
 export TORCH_COMPILE_DISABLE=1
 export VLLM_GPU_MEMORY_UTILIZATION=0.7
 export VLLM_DISABLE_PROGRESS_BAR=1
@@ -28,20 +28,20 @@ for model_name in "${MODELS[@]}"; do
   model_out="${OUT_ROOT}/${model_name}"
   mkdir -p "${model_out}"
 
-  for level in 1 2 3 4 5; do
+  for level in 4 5; do
     python collect_tot.py \
       --dataset-name hendrycks_math \
       --dataset-path "${MATH_PATH}" \
-      --split train \
+      --split test \
       --level "${level}" \
       --gpus "${GPUS}" \
       --model-dir "${model_dir}" \
       --output-dir "${model_out}/math_l${level}" \
       --output-prefix math_l${level}_tot \
-      --sample-batch-size 16 \
+      --sample-batch-size 8 \
       --rollouts-per-candidate 8 \
-      --rollout-batch-size 125 \
-      --max-samples 300 \
+      --rollout-batch-size  50 \
+      --max-samples 50 \
       --log-per-sample
   done
 done
